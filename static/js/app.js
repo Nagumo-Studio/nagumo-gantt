@@ -188,22 +188,30 @@ function buildGroups() {
     });
 }
 
-function buildHolidays() {
-    // Generate background items for holidays/weekends for a range (e.g., year 2026-2027)
-    const startDate = moment('2026-01-01');
-    const endDate = moment('2027-12-31');
+// Vis.jsのアイテムエンジンを介さず、直接DOMの背景領域に色を塗る関数
+function drawHolidaysDirectly() {
+    if (!timeline) return;
     
-    let holidayItems = [];
-    let bgId = 0;
-    
-    for (let m = moment(startDate); m.isBefore(endDate); m.add(1, 'days')) {
+    // Vis.jsの一番奥底の背景パネル要素を取得
+    const backgroundPanel = document.querySelector('.vis-panel.vis-background');
+    if (!backgroundPanel) return;
+
+    // 前回のカスタム背景をクリア
+    const oldBgs = backgroundPanel.querySelectorAll('.custom-holiday-bg');
+    oldBgs.forEach(el => el.remove());
+
+    // 現在の画面表示範囲を取得し、少し広めに描画する
+    const win = timeline.getWindow();
+    const start = moment(win.start).subtract(3, 'days').startOf('day');
+    const end = moment(win.end).add(3, 'days').startOf('day');
+
+    for (let m = moment(start); m.isBefore(end); m.add(1, 'days')) {
         const dateStr = m.format('YYYY-MM-DD');
-        const dayOfWeek = m.day(); // 0: Sun, 6: Sat
+        const dayOfWeek = m.day();
         
         let isHoliday = false;
         let className = '';
         
-        // 1. マスタチェック
         const masterHoliday = masters.holiday ? masters.holiday.find(h => h.holiday_date === dateStr) : null;
         
         if (masterHoliday) {
@@ -217,21 +225,76 @@ function buildHolidays() {
             className = 'bg-saturday';
         }
         
-        // 平日も白で強制的に塗りつぶす（Vis.jsの謎のピンク背景を隠蔽する）
-        if (!isHoliday || className === '') {
-            className = 'bg-weekday';
-        }
+        const currentDayDate = m.toDate();
+        const nextDayDate = m.clone().add(1, 'days').toDate();
         
-        holidayItems.push({
-            id: 'bg_' + (bgId++),
-            start: m.clone().startOf('day').toDate(),
-            end: m.clone().add(1, 'days').startOf('day').toDate(),
-            type: 'background',
-            className: className
-        });
+        const rangeStart = win.start.valueOf();
+        const rangeEnd = win.end.valueOf();
+        const rangeWidth = rangeEnd - rangeStart;
+        const panelWidth = backgroundPanel.clientWidth;
+        
+        // 時間の比率からピクセルX座標を正確に計算
+        const leftX = ((currentDayDate.valueOf() - rangeStart) / rangeWidth) * panelWidth;
+        const rightX = ((nextDayDate.valueOf() - rangeStart) / rangeWidth) * panelWidth;
+        const width = rightX - leftX;
+
+        // 休日背景の描画
+        if (isHoliday) {
+            const div = document.createElement('div');
+            div.className = `custom-holiday-bg`;
+            div.style.position = 'absolute';
+            div.style.top = '0';
+            div.style.bottom = '0';
+            div.style.left = leftX + 'px';
+            div.style.width = width + 'px';
+            div.style.pointerEvents = 'none'; // 操作の邪魔をさせない
+            div.style.zIndex = '0'; // 背景の一番奥
+            
+            if (className === 'bg-saturday') {
+                div.style.backgroundColor = 'rgba(173, 216, 230, 0.4)';
+            } else if (className === 'bg-sunday-public') {
+                div.style.backgroundColor = 'rgba(255, 182, 193, 0.4)';
+            } else if (className === 'bg-company-holiday') {
+                div.style.backgroundColor = 'rgba(211, 211, 211, 0.4)';
+            }
+
+            backgroundPanel.appendChild(div);
+        }
+
+        // 月の境目の垂直線（太い罫線）: その月の1日の開始位置
+        if (m.date() === 1) {
+            const line = document.createElement('div');
+            line.className = 'custom-holiday-bg custom-month-line';
+            line.style.position = 'absolute';
+            line.style.top = '0';
+            line.style.bottom = '0';
+            line.style.left = leftX + 'px';
+            line.style.width = '2px';
+            line.style.backgroundColor = '#666'; // 太い罫線
+            line.style.pointerEvents = 'none';
+            line.style.zIndex = '1'; // 休日背景より手前
+            backgroundPanel.appendChild(line);
+        }
+        // 週の境目の垂直線（破線）: 月曜日の開始位置（月の境目と被らない場合のみ）
+        else if (dayOfWeek === 1) {
+            const line = document.createElement('div');
+            line.className = 'custom-holiday-bg custom-week-line';
+            line.style.position = 'absolute';
+            line.style.top = '0';
+            line.style.bottom = '0';
+            line.style.left = leftX + 'px';
+            line.style.width = '0px';
+            line.style.borderLeft = '1px dashed #aaa'; // 破線
+            line.style.pointerEvents = 'none';
+            line.style.zIndex = '1';
+            backgroundPanel.appendChild(line);
+        }
     }
-    
-    items.add(holidayItems);
+}
+
+// （不要になった旧関数。呼び出し元のエラーを防ぐために空で残す）
+function buildHolidays() {
+    // 廃止。Vis.jsのアイテムエンジンを使用した背景描画はバグの温床となるため使用しない。
 }
 
 function updateParentBars() {
@@ -286,13 +349,16 @@ function updateParentBars() {
         // contentからタグを除去してテキストだけにする
         const titleText = groupObj.content.replace(/<[^>]+>/g, '');
         
+        // treeLevel が 2 ならキャラクターのバー
+        const extraClass = groupObj.treeLevel === 2 ? 'char-group-bar' : '';
+
         parentBars.push({
             id: 'parent_bar_' + gid,
             group: gid,
             start: new Date(bounds.start),
             end: new Date(bounds.end),
             content: `
-                <div class="parent-group-bar" data-group-id="${gid}">
+                <div class="parent-group-bar ${extraClass}" data-group-id="${gid}">
                     <span class="collapse-icon">${icon}</span>
                     <span class="parent-title">${titleText}</span>
                 </div>
@@ -349,8 +415,9 @@ function initTimeline() {
         margin: {
             item: {
                 horizontal: 0,
-                vertical: 2
-            }
+                vertical: -2 /* マイナス値を設定して強制的に余白を詰める */
+            },
+            axis: 0
         },
         snap: function (date, scale, step) {
             // ドラッグやリサイズ時に0:00固定にする
@@ -401,6 +468,11 @@ function initTimeline() {
 
     timeline.on('select', function (props) {
         serverLog('DEBUG', "select: " + JSON.stringify(props));
+    });
+
+    // 描画が更新されるたびに背景を描画し直す
+    timeline.on('changed', function() {
+        drawHolidaysDirectly();
     });
 
     timeline.on('click', function (props) {

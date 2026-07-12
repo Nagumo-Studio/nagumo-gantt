@@ -11,6 +11,9 @@
 .vis-panel.vis-background .vis-group,
 .vis-panel.vis-background .vis-group.vis-odd,
 .vis-panel.vis-background .vis-group.vis-even,
+.vis-panel.vis-center .vis-group,
+.vis-panel.vis-center .vis-group.vis-odd,
+.vis-panel.vis-center .vis-group.vis-even,
 .vis-labelset .vis-label,
 .vis-labelset .vis-label.vis-odd,
 .vis-labelset .vis-label.vis-even,
@@ -20,6 +23,16 @@
 .vis-time-axis .vis-grid.vis-major {
     background: transparent !important;
     background-color: transparent !important;
+}
+
+/* 邪魔な水平線を完全に消す */
+.vis-timeline .vis-grid.vis-horizontal,
+.vis-timeline .vis-grid.vis-vertical {
+    border-bottom: none !important;
+    border-color: transparent !important;
+}
+.vis-timeline .vis-group {
+    border-bottom: none !important;
 }
 
 .vis-timeline {
@@ -36,25 +49,31 @@
 
 /* ドラッグ＆ドロップ先となるため、空のレーングループにも最低限の高さを持たせる */
 .vis-timeline .vis-group {
-    min-height: calc(30px * var(--ui-scale, 1)) !important;
+    /* min-heightをCSSで強制するとアイテムの位置計算と当たり判定が狂う原因になるため削除 */
+    /* min-height: calc(30px * var(--ui-scale, 1)) !important; */
 }
 
 /* Vis.js のアイテム自体のデフォルトの枠線を消す */
-.vis-item,
-.vis-item.vis-range,
-.vis-item-overflow,
-.vis-item-content {
-    border-color: transparent !important;
-    border-width: 0 !important;
+.vis-item {
     background-color: transparent !important;
-    padding: 0 !important;
-    overflow: visible !important;
-    box-sizing: content-box !important;
+    border-color: transparent !important;
+    z-index: 10 !important;
+    pointer-events: auto !important;
+    cursor: move;
+    user-select: none !important;
+    -webkit-user-drag: none !important;
+    touch-action: none !important; /* ブラウザのスクロール判定を無効化し、ドラッグ（pan）の即時発動を促す */
+}
+
+.vis-item.vis-selected {
+    background-color: transparent !important;
+    border-color: transparent !important;
 }
 .vis-item-content {
     width: 100%;
-    display: flex;
-    align-items: center;
+    display: block;
+    user-select: none !important;
+    line-height: 1;
 }
 
 /* バーと左アイコンを包むラッパー */
@@ -62,6 +81,7 @@
     position: relative;
     width: 100%;
     min-width: 0;
+    pointer-events: none; /* Vis.jsのドラッグ判定を安定させるため中身の要素はイベントを透過させる */
 }
 
 /* 担当者座布団（アイコン）: バーの内側左端に配置 */
@@ -144,8 +164,7 @@
 }
 
 .vis-item.vis-selected .custom-item {
-    border-color: #ff0000;
-    box-shadow: 0 0 5px red;
+    box-shadow: 0 0 0 3px #fbbf24 !important; /* Tailwindのyellow-400相当 */
 }
 
 /* 親階層バー（折りたたみ用）のスタイル */
@@ -170,6 +189,15 @@
     background-color: #555;
 }
 
+.parent-group-bar.char-group-bar {
+    background-color: #e5e7eb; /* Tailwindのgray-200相当（淡いグレー） */
+    color: #000; /* 黒の太字 */
+    font-weight: 900;
+}
+.parent-group-bar.char-group-bar:hover {
+    background-color: #d1d5db;
+}
+
 .collapse-icon {
     margin-right: 6px;
     font-family: monospace;
@@ -179,27 +207,44 @@
 /* 休日背景色 */
 .bg-saturday {
     background-color: rgba(173, 216, 230, 0.4) !important; /* 薄い青 */
+    pointer-events: none !important;
 }
 .bg-sunday-public {
     background-color: rgba(255, 182, 193, 0.4) !important; /* 薄い赤 */
+    pointer-events: none !important;
 }
 .bg-company-holiday {
     background-color: rgba(211, 211, 211, 0.4) !important; /* 薄いグレー */
+    pointer-events: none !important;
 }
 .bg-weekday {
     background-color: #ffffff !important; /* 平日は強制的に白で塗りつぶす */
+    pointer-events: none !important;
 }
 
 /* タイムラインの軸のテキストや幅を詰める（極限まで狭く） */
 .vis-time-axis .vis-text {
     padding-left: 0 !important;
     padding-right: 0 !important;
-    font-size: 9px !important;
+    font-size: 9px !important; /* 日付・週番号用 */
     letter-spacing: -1px;
-    min-width: 8px !important; /* 極限まで狭く */
+    min-width: 8px !important;
     transform: scaleX(0.8);
     transform-origin: center;
     overflow: hidden;
+    text-align: center !important; /* 日付を真ん中寄せにする */
+    width: 100%; /* セル幅いっぱいにして中央揃えを効かせる */
+}
+
+/* 年月のラベルだけは大きく表示する */
+.vis-time-axis .vis-text.vis-major {
+    font-size: 16px !important;
+    font-weight: bold;
+    transform: none;
+    letter-spacing: normal;
+    padding-left: 6px !important; /* 太線と被るのを防ぐため右にずらす */
+    text-align: left !important; /* 年月は左寄せのまま */
+    width: auto;
 }
 
 /* 空レーンのドロップ判定用ダミーアイテム */
