@@ -128,6 +128,33 @@ function generateTaskTooltip(task) {
     const memberName = member ? member.member_name : '未定';
     const sectionName = section ? section.section_name : '未定';
 
+    // 営業日（工数・人日）の計算
+    let manDays = 0;
+    const startM = moment(task.start_date).startOf('day');
+    const endM = moment(task.end_date).startOf('day');
+    
+    // start_date から end_date まで（同日含む）ループ
+    if (startM.isValid() && endM.isValid()) {
+        for (let m = moment(startM); m.isSameOrBefore(endM); m.add(1, 'days')) {
+            const dateStr = m.format('YYYY-MM-DD');
+            const dayOfWeek = m.day();
+            
+            let isHoliday = false;
+            // マスタに登録されているかチェック
+            if (masters.holiday && masters.holiday.find(h => h.holiday_date === dateStr)) {
+                isHoliday = true;
+            }
+            // 日・土チェック
+            else if (dayOfWeek === 0 || dayOfWeek === 6) {
+                isHoliday = true;
+            }
+            
+            if (!isHoliday) {
+                manDays++;
+            }
+        }
+    }
+
     return `
         <div style="padding: 4px; font-size: 12px; line-height: 1.5;">
             <div style="font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid #ccc; padding-bottom: 2px;">${task.task_name}</div>
@@ -135,6 +162,7 @@ function generateTaskTooltip(task) {
             <div>担当者: ${memberName}</div>
             <div>期間: ${task.start_date} 〜 ${task.end_date}</div>
             <div>進捗: ${task.progress}%</div>
+            <div>工数: ${manDays}人日</div>
         </div>
     `;
 }
@@ -315,45 +343,58 @@ function drawHolidaysDirectly() {
         });
 
         if (activeLineCount > 0 && !isHoliday) {
-            // ヒートマップ色の決定（数が多くなるほど赤くなる）
-            let heatColor = 'rgba(255, 255, 255, 0.8)';
-            let textColor = '#333';
-            
+            let heatColor = 'rgba(134, 239, 172, 0.8)'; // 緑
             if (activeLineCount >= 5) {
-                heatColor = 'rgba(239, 68, 68, 0.8)'; // Tailwindのred-500
-                textColor = '#fff';
+                heatColor = 'rgba(239, 68, 68, 0.8)'; // 赤
             } else if (activeLineCount >= 3) {
-                heatColor = 'rgba(245, 158, 11, 0.8)'; // Tailwindのamber-500 (オレンジ)
-            } else if (activeLineCount >= 1) {
-                heatColor = 'rgba(134, 239, 172, 0.8)'; // Tailwindのgreen-300
+                heatColor = 'rgba(245, 158, 11, 0.8)'; // オレンジ
             }
-            
-            // セクションフィルタされている場合は青ベースのヒートマップにするなどの工夫も可能だが
-            // シンプルに一律でヒートマップカラーにする
             if (filterSectionId) {
-                heatColor = 'rgba(96, 165, 250, 0.8)'; // フィルタ中は青色でハイライト
-                textColor = '#fff';
+                heatColor = 'rgba(96, 165, 250, 0.8)'; // 青
             }
 
-            // 平日のみ日付の下（タスク領域の一番上）にLine数を表示し、背景色をインジケーターとする
+            const maxLineHeight = 5; // 5タスクを上限(100%)として高さを計算
+            const heightPercent = Math.min((activeLineCount / maxLineHeight) * 100, 100);
+
+            // コンテナ（白背景）
+            const containerDiv = document.createElement('div');
+            containerDiv.className = 'custom-holiday-bg';
+            containerDiv.style.position = 'absolute';
+            containerDiv.style.top = '0';
+            containerDiv.style.left = leftX + 'px';
+            containerDiv.style.width = width + 'px';
+            containerDiv.style.height = '32px';
+            containerDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+            containerDiv.style.borderBottom = '1px solid #ddd';
+            containerDiv.style.borderRight = '1px solid #eee';
+            containerDiv.style.zIndex = '5';
+            
+            // 棒グラフ部分（下から伸びる）
+            const barDiv = document.createElement('div');
+            barDiv.style.position = 'absolute';
+            barDiv.style.bottom = '0';
+            barDiv.style.left = '0';
+            barDiv.style.width = '100%';
+            barDiv.style.height = `${heightPercent}%`;
+            barDiv.style.backgroundColor = heatColor;
+            containerDiv.appendChild(barDiv);
+
+            // テキスト部分
             const textDiv = document.createElement('div');
-            textDiv.className = 'custom-holiday-bg';
             textDiv.style.position = 'absolute';
             textDiv.style.top = '0';
-            textDiv.style.left = leftX + 'px';
-            textDiv.style.width = width + 'px';
-            textDiv.style.height = '16px';
-            textDiv.style.lineHeight = '16px';
+            textDiv.style.left = '0';
+            textDiv.style.width = '100%';
+            textDiv.style.height = '100%';
+            textDiv.style.lineHeight = '32px';
             textDiv.style.textAlign = 'center';
-            textDiv.style.fontSize = '10px';
+            textDiv.style.fontSize = '12px';
             textDiv.style.fontWeight = 'bold';
-            textDiv.style.color = textColor;
-            textDiv.style.backgroundColor = heatColor;
-            textDiv.style.borderBottom = '1px solid #ddd';
-            textDiv.style.borderRight = '1px solid #eee';
-            textDiv.style.zIndex = '5';
+            textDiv.style.color = '#333';
             textDiv.innerText = activeLineCount;
-            centerPanel.appendChild(textDiv);
+            containerDiv.appendChild(textDiv);
+
+            centerPanel.appendChild(containerDiv);
         }
 
         // 月の境目の垂直線（太い罫線）: その月の1日の開始位置
@@ -512,7 +553,7 @@ function initTimeline() {
                 horizontal: 0,
                 vertical: 0
             },
-            axis: 16 // Line数表示用のスペースを上部に16px確保
+            axis: 32 // Line数表示用のスペースを上部に32px確保
         },
         snap: function (date, scale, step) {
             // ドラッグやリサイズ時に0:00固定にする
