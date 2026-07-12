@@ -3,3 +3,9 @@ data/**/*.csv
 
 # But keep Sample project data for Git tracking
 !data/projects/Sample/*.csv
+
+# Python Virtual Environment
+venv/
+env/
+__pycache__/
+*.pyc
