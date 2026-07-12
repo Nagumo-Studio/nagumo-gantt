@@ -102,7 +102,14 @@ def get_tasks():
     p_dir = get_project_dir(project_name)
     print(f"DEBUG: p_dir={p_dir}")
     tasks = []
-    task_files = glob.glob(os.path.join(p_dir, 't_tasks_*.csv'))
+    # EXE化環境でのglobバグを回避するため、os.listdirで手動抽出
+    try:
+        files = os.listdir(p_dir)
+        task_files = [os.path.join(p_dir, f) for f in files if f.startswith('t_tasks_') and f.endswith('.csv')]
+    except Exception as e:
+        print(f"DEBUG: Error reading directory: {e}")
+        task_files = []
+        
     print(f"DEBUG: task_files={task_files}")
     for f in task_files:
         tasks.extend(read_csv_as_dicts(f))

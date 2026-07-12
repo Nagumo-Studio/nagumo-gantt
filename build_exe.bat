@@ -14,7 +14,7 @@ pip install pyinstaller
 
 echo.
 echo ビルドを開始します...
-pyinstaller --noconfirm --onefile --windowed --add-data "templates;templates" --add-data "static;static" --add-data "data;data" app.py
+pyinstaller --noconfirm --onefile --windowed --add-data "templates;templates" --add-data "static;static" app.py
 
 echo.
 echo ========================================================
