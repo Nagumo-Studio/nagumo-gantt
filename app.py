@@ -200,7 +200,8 @@ if __name__ == '__main__':
         except Exception:
             webbrowser.open(url)
         
-    threading.Thread(target=open_browser, daemon=True).start()
+    if not os.environ.get('WERKZEUG_RUN_MAIN'):
+        threading.Thread(target=open_browser, daemon=True).start()
 
     if getattr(sys, 'frozen', False):
         app.run(debug=False, port=PORT)

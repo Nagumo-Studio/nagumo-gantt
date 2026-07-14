@@ -83,33 +83,39 @@
             </div>
             <div class="p-4 flex-1 overflow-y-auto space-y-4">
                 <input type="hidden" id="edit-task-id">
+                <input type="hidden" id="edit-group-type">
                 
-                <div>
+                <div id="editor-field-release">
                     <label class="block font-bold mb-1">バージョン</label>
                     <select id="edit-release" class="w-full border rounded p-2"></select>
                 </div>
                 
-                <div>
+                <div id="editor-field-event">
+                    <label class="block font-bold mb-1">イベント</label>
+                    <input type="text" id="edit-event" class="w-full border rounded p-2 bg-gray-100" readonly placeholder="マスタデータ参照">
+                </div>
+
+                <div id="editor-field-character">
                     <label class="block font-bold mb-1">キャラクター</label>
                     <select id="edit-character" class="w-full border rounded p-2"></select>
                 </div>
 
-                <div>
+                <div id="editor-field-section">
                     <label class="block font-bold mb-1">セクション</label>
                     <select id="edit-section" class="w-full border rounded p-2"></select>
                 </div>
 
-                <div>
+                <div id="editor-field-task-name">
                     <label class="block font-bold mb-1">タスク名 (雛形)</label>
                     <select id="edit-task-name" class="w-full border rounded p-2"></select>
                 </div>
 
-                <div>
+                <div id="editor-field-member">
                     <label class="block font-bold mb-1">担当者</label>
                     <select id="edit-member" class="w-full border rounded p-2"></select>
                 </div>
 
-                <div class="flex space-x-2">
+                <div id="editor-field-dates" class="flex space-x-2">
                     <div class="flex-1">
                         <label class="block font-bold mb-1">開始日</label>
                         <input type="date" id="edit-start" class="w-full border rounded p-2">
@@ -120,7 +126,7 @@
                     </div>
                 </div>
 
-                <div>
+                <div id="editor-field-progress">
                     <label class="block font-bold mb-1">進捗率 (%)</label>
                     <input type="number" id="edit-progress" min="0" max="100" class="w-full border rounded p-2">
                 </div>

@@ -49,6 +49,8 @@ const els = {
 let currentTaskContextId = null;
 let lastMouseTime = null;
 let lastMouseGroup = null;
+let currentHoverDate = null;
+let currentHoverGroup = null;
 
 // --- Initialization ---
 async function init() {
@@ -403,7 +405,7 @@ function renderTasks() {
             }
             level = i + 1;
         }
-        laneStacks[parentId][level] = x + width + 5;
+        laneStacks[parentId][level] = x + width;
 
         const section = getMasterItem('section', 'section_id', t.section_id);
         const member = getMasterItem('member', 'member_id', t.member_id);
@@ -552,9 +554,13 @@ function setupMouseTracking() {
             els.crosshairRow.style.top = `${rowTop}px`;
             els.crosshairRow.style.height = `${ganttConfig.rowHeight}px`;
             els.crosshairRow.classList.remove('hidden');
+            currentHoverGroup = ganttConfig.groups[rowIndex].id;
         } else {
             els.crosshairRow.classList.add('hidden');
+            currentHoverGroup = null;
         }
+        
+        currentHoverDate = dateM.toDate();
 
         const hoveredTask = e.target.closest('.gantt-task-item');
         if (hoveredTask && els.taskTooltip) {
@@ -641,16 +647,24 @@ function setupMouseTracking() {
         const dy = e.clientY - dragState.startY;
         
         if (dragState.mode === 'move') {
-            dragState.element.style.left = `${dragState.initialLeft + dx}px`;
-            dragState.element.style.top = `${dragState.initialTop + dy}px`;
+            const rawLeft = dragState.initialLeft + dx;
+            const rawTop = dragState.initialTop + dy;
+            const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+            dragState.element.style.left = `${snappedLeft}px`;
+            dragState.element.style.top = `${rawTop}px`;
         } else if (dragState.mode === 'resize-right') {
-            const newWidth = Math.max(10, dragState.initialWidth + dx);
-            dragState.element.style.width = `${newWidth}px`;
+            const rawWidth = dragState.initialWidth + dx;
+            const snappedWidth = Math.max(ganttConfig.dayWidth, Math.round(rawWidth / ganttConfig.dayWidth) * ganttConfig.dayWidth);
+            dragState.element.style.width = `${snappedWidth}px`;
         } else if (dragState.mode === 'resize-left') {
-            const newWidth = Math.max(10, dragState.initialWidth - dx);
-            const newLeft = dragState.initialLeft + (dragState.initialWidth - newWidth);
-            dragState.element.style.width = `${newWidth}px`;
-            dragState.element.style.left = `${newLeft}px`;
+            const rawLeft = dragState.initialLeft + dx;
+            const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+            const rightEdge = dragState.initialLeft + dragState.initialWidth;
+            const snappedWidth = Math.max(ganttConfig.dayWidth, rightEdge - snappedLeft);
+            // 右端を固定して左端を動かすので、左端のスナップ位置に合わせて幅も再計算する
+            const actualLeft = rightEdge - snappedWidth;
+            dragState.element.style.width = `${snappedWidth}px`;
+            dragState.element.style.left = `${actualLeft}px`;
         }
     });
 
@@ -756,32 +770,100 @@ function setupZoom() {
 }
 
 // --- Editor & Context Menu ---
-function openEditor(taskId) {
-    const raw = allTasksRaw.find(t => t.task_id === taskId);
-    if (!raw) return;
-    populateDropdowns();
-    
-    document.getElementById('edit-task-id').value = raw.task_id;
-    document.getElementById('edit-release').value = raw.release_id;
-    document.getElementById('edit-character').value = raw.char_id;
-    document.getElementById('edit-section').value = raw.section_id;
-    
-    document.getElementById('edit-section').dispatchEvent(new Event('change'));
-    
-    document.getElementById('edit-task-name').value = raw.task_name;
-    document.getElementById('edit-member').value = raw.member_id;
-    document.getElementById('edit-start').value = raw.start_date;
-    document.getElementById('edit-end').value = raw.end_date;
-    document.getElementById('edit-progress').value = raw.progress;
+function setEditorVisibility(type) {
+    const fields = ['release', 'event', 'character', 'section', 'task-name', 'member', 'dates', 'progress'];
+    fields.forEach(f => {
+        const el = document.getElementById(`editor-field-${f}`);
+        if (el) el.classList.remove('hidden');
+    });
 
-    document.getElementById('btn-delete-task').classList.remove('hidden');
-    document.getElementById('editor-title').textContent = 'タスク編集';
+    if (type === 'release') {
+        ['character', 'section', 'task-name', 'member', 'dates', 'progress'].forEach(f => {
+            const el = document.getElementById(`editor-field-${f}`);
+            if (el) el.classList.add('hidden');
+        });
+        document.getElementById('edit-release').disabled = true;
+    } else if (type === 'character') {
+        ['section', 'task-name', 'member', 'dates', 'progress'].forEach(f => {
+            const el = document.getElementById(`editor-field-${f}`);
+            if (el) el.classList.add('hidden');
+        });
+        document.getElementById('edit-release').disabled = true;
+        document.getElementById('edit-character').disabled = true;
+    } else {
+        document.getElementById('edit-release').disabled = false;
+        document.getElementById('edit-character').disabled = false;
+    }
+}
+
+function updateEventDisplay(releaseId) {
+    const el = document.getElementById('edit-event');
+    if (!el) return;
+    if (releaseId) {
+        const rel = getMasterItem('release', 'release_id', releaseId);
+        el.value = rel ? rel.event_name : '';
+    } else {
+        el.value = '';
+    }
+}
+
+function openEditor(data, type = 'task') {
+    populateDropdowns();
+    document.getElementById('edit-group-type').value = type;
+
+    if (type === 'task') {
+        setEditorVisibility('task');
+        const raw = allTasksRaw.find(t => t.task_id === data);
+        if (!raw) return;
+        
+        document.getElementById('edit-task-id').value = raw.task_id;
+        document.getElementById('edit-release').value = raw.release_id;
+        document.getElementById('edit-character').value = raw.char_id;
+        document.getElementById('edit-section').value = raw.section_id;
+        
+        updateEventDisplay(raw.release_id);
+        
+        document.getElementById('edit-section').dispatchEvent(new Event('change'));
+        
+        document.getElementById('edit-task-name').value = raw.task_name;
+        document.getElementById('edit-member').value = raw.member_id;
+        document.getElementById('edit-start').value = raw.start_date;
+        document.getElementById('edit-end').value = raw.end_date;
+        document.getElementById('edit-progress').value = raw.progress;
+
+        document.getElementById('btn-delete-task').classList.remove('hidden');
+        document.getElementById('btn-apply-task').classList.remove('hidden');
+        document.getElementById('editor-title').textContent = 'タスク編集';
+    } else if (type === 'group') {
+        const group = data; // data is group object
+        document.getElementById('edit-task-id').value = '';
+        
+        if (group.type === 'release') {
+            setEditorVisibility('release');
+            document.getElementById('edit-release').value = group.raw.release_id;
+            updateEventDisplay(group.raw.release_id);
+            document.getElementById('editor-title').textContent = 'バージョン情報';
+        } else if (group.type === 'character') {
+            setEditorVisibility('character');
+            document.getElementById('edit-release').value = group.parentId;
+            document.getElementById('edit-character').value = group.raw.char_id;
+            updateEventDisplay(group.parentId);
+            document.getElementById('editor-title').textContent = 'キャラクター情報';
+        }
+        
+        document.getElementById('btn-delete-task').classList.add('hidden');
+        document.getElementById('btn-apply-task').classList.add('hidden'); // 表示のみ
+    }
+
     document.getElementById('side-panel').classList.remove('translate-x-full');
 }
 
 function openEditorNew(groupId, dateObj) {
     populateDropdowns();
+    setEditorVisibility('task');
+    document.getElementById('edit-group-type').value = 'task';
     document.getElementById('edit-task-id').value = '';
+    
     const dateStr = moment(dateObj).format('YYYY-MM-DD');
     document.getElementById('edit-start').value = dateStr;
     document.getElementById('edit-end').value = dateStr;
@@ -789,11 +871,14 @@ function openEditorNew(groupId, dateObj) {
     
     const parts = groupId.split('_');
     if (parts.length >= 4) {
-        document.getElementById('edit-release').value = parts[0] + '_' + parts[1];
+        const releaseId = parts[0] + '_' + parts[1];
+        document.getElementById('edit-release').value = releaseId;
         document.getElementById('edit-character').value = parts[2] + '_' + parts[3];
+        updateEventDisplay(releaseId);
     }
     
     document.getElementById('btn-delete-task').classList.add('hidden');
+    document.getElementById('btn-apply-task').classList.remove('hidden');
     document.getElementById('editor-title').textContent = '新規タスク作成';
     document.getElementById('side-panel').classList.remove('translate-x-full');
 }
@@ -812,6 +897,10 @@ function populateDropdowns() {
 function setupMiscEvents() {
     document.getElementById('btn-close-panel').addEventListener('click', () => {
         document.getElementById('side-panel').classList.add('translate-x-full');
+    });
+
+    document.getElementById('edit-release').addEventListener('change', (e) => {
+        updateEventDisplay(e.target.value);
     });
 
     document.getElementById('edit-section').addEventListener('change', (e) => {
@@ -932,8 +1021,19 @@ function setupMiscEvents() {
     
     els.ganttTasks.addEventListener('dblclick', (e) => {
         const taskEl = e.target.closest('.gantt-task-item');
+        const groupEl = e.target.closest('[onclick^="toggleGroup"]'); // 親バー
+        
         if (taskEl) {
-            openEditor(taskEl.getAttribute('data-task-id'));
+            openEditor(taskEl.getAttribute('data-task-id'), 'task');
+        } else if (groupEl) {
+            const match = groupEl.getAttribute('onclick').match(/toggleGroup\('([^']+)'\)/);
+            if (match && match[1]) {
+                const groupId = match[1];
+                const group = ganttConfig.groups.find(g => g.id === groupId);
+                if (group) {
+                    openEditor(group, 'group');
+                }
+            }
         } else {
             const rect = els.ganttBodyContent.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -982,6 +1082,31 @@ function setupMiscEvents() {
         if (!e.target.closest('#context-menu') && e.button !== 2) {
             const contextMenu = document.getElementById('context-menu');
             if (contextMenu) contextMenu.classList.add('hidden');
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        // 入力フォーム等にフォーカスがある場合はスキップ
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+
+        if (e.ctrlKey && e.key === 'c') {
+            if (currentTaskContextId) {
+                const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
+                if (t) copiedTaskRaw = JSON.parse(JSON.stringify(t));
+            }
+        } else if (e.ctrlKey && e.key === 'v') {
+            if (copiedTaskRaw && currentHoverGroup && currentHoverDate) {
+                pasteTask(currentHoverGroup, currentHoverDate);
+            }
+        } else if (e.key === 'Delete') {
+            if (currentTaskContextId) {
+                if (confirm('選択中のタスクを削除しますか？')) {
+                    saveHistory();
+                    allTasksRaw = allTasksRaw.filter(t => t.task_id !== currentTaskContextId);
+                    markUnsaved();
+                    renderGantt();
+                }
+            }
         }
     });
 
