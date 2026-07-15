@@ -93,6 +93,10 @@ async function fetchProjects() {
     }
 
     renderTabs();
+    if (currentProject) {
+        const meLink = document.getElementById('master-editor-link');
+        if (meLink) meLink.href = `/master_editor?project=${currentProject}`;
+    }
 }
 
 function renderTabs() {
@@ -336,8 +340,19 @@ function buildGroupsList() {
     ganttConfig.groups = [];
     if (!masters.release || !masters.character) return;
 
+    // タスクから必要な組み合わせを抽出
+    const activeReleases = new Set();
+    const activeChars = new Set();
+    
+    allTasksRaw.forEach(t => {
+        if (t.release_id) activeReleases.add(t.release_id);
+        if (t.release_id && t.char_id) activeChars.add(`${t.release_id}_${t.char_id}`);
+    });
+
     masters.release.forEach(rel => {
         const relId = rel.release_id;
+        if (!activeReleases.has(relId)) return;
+
         ganttConfig.groups.push({
             id: relId, type: 'release', name: rel.release_name, level: 0, raw: rel
         });
@@ -346,6 +361,8 @@ function buildGroupsList() {
 
         masters.character.forEach(char => {
             const charId = `${rel.release_id}_${char.char_id}`;
+            if (!activeChars.has(charId)) return;
+
             ganttConfig.groups.push({
                 id: charId, type: 'character', name: `${char.char_name} (${char.costume_name})`, parentId: relId, level: 1, raw: char
             });
@@ -362,7 +379,9 @@ function buildGroupsList() {
     });
     
     const totalHeight = ganttConfig.groups.length * ganttConfig.rowHeight;
-    els.ganttBodyContent.style.minHeight = `${totalHeight}px`;
+    // グループが全くない（タスクがない）場合でも背景グリッドが消えないよう、コンテナの高さ以上を確保する
+    const containerHeight = els.ganttBody.clientHeight;
+    els.ganttBodyContent.style.minHeight = `${Math.max(totalHeight, containerHeight)}px`;
 }
 
 function renderHeaderAndGrid(totalWidth) {
@@ -688,13 +707,14 @@ function setupMouseTracking() {
         const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
         const rowTop = rowIndex * ganttConfig.rowHeight;
         
+        // グループがない場所でもクロスヘアの行は表示する
+        els.crosshairRow.style.top = `${rowTop}px`;
+        els.crosshairRow.style.height = `${ganttConfig.rowHeight}px`;
+        els.crosshairRow.classList.remove('hidden');
+
         if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-            els.crosshairRow.style.top = `${rowTop}px`;
-            els.crosshairRow.style.height = `${ganttConfig.rowHeight}px`;
-            els.crosshairRow.classList.remove('hidden');
             currentHoverGroup = ganttConfig.groups[rowIndex].id;
         } else {
-            els.crosshairRow.classList.add('hidden');
             currentHoverGroup = null;
         }
         
@@ -1007,18 +1027,48 @@ function openEditorNew(groupId, dateObj) {
     document.getElementById('edit-end').value = dateStr;
     document.getElementById('edit-progress').value = 0;
     
-    const parts = groupId.split('_');
-    if (parts.length >= 4) {
-        const releaseId = parts[0] + '_' + parts[1];
-        document.getElementById('edit-release').value = releaseId;
-        document.getElementById('edit-character').value = parts[2] + '_' + parts[3];
-        updateEventDisplay(releaseId);
+    document.getElementById('edit-release').value = '';
+    document.getElementById('edit-character').value = '';
+    updateEventDisplay('');
+
+    if (groupId) {
+        const parts = groupId.split('_');
+        if (parts.length >= 4) {
+            const releaseId = parts[0] + '_' + parts[1];
+            document.getElementById('edit-release').value = releaseId;
+            document.getElementById('edit-character').value = parts[2] + '_' + parts[3];
+            updateEventDisplay(releaseId);
+        }
     }
     
     document.getElementById('btn-delete-task').classList.add('hidden');
     document.getElementById('btn-apply-task').classList.remove('hidden');
     document.getElementById('editor-title').textContent = '新規タスク作成';
     document.getElementById('side-panel').classList.remove('translate-x-full');
+}
+
+function syncCharacterDropdowns(charId) {
+    const nameSel = document.getElementById('edit-character-name');
+    const costumeSel = document.getElementById('edit-character-costume');
+    const hiddenChar = document.getElementById('edit-character');
+    
+    hiddenChar.value = charId || '';
+    if (!charId) {
+        nameSel.value = '';
+        costumeSel.innerHTML = '<option value="">選択してください</option>';
+        return;
+    }
+    
+    const charObj = masters.character.find(c => c.char_id === charId);
+    if (charObj) {
+        nameSel.value = charObj.char_name;
+        const costumes = masters.character.filter(c => c.char_name === charObj.char_name);
+        costumeSel.innerHTML = costumes.map(c => `<option value="${c.char_id}">${c.costume_name || 'デフォルト'}</option>`).join('');
+        costumeSel.value = charId;
+    } else {
+        nameSel.value = '';
+        costumeSel.innerHTML = '<option value="">選択してください</option>';
+    }
 }
 
 function populateDropdowns() {
@@ -1028,11 +1078,37 @@ function populateDropdowns() {
             data.map(d => `<option value="${d[idField]}">${d[nameField]}</option>`).join('');
     };
     renderOptions(masters.release, 'release_id', 'release_name', 'edit-release');
-    renderOptions(masters.character, 'char_id', 'char_name', 'edit-character');
     renderOptions(masters.section, 'section_id', 'section_name', 'edit-section');
+
+    const nameSel = document.getElementById('edit-character-name');
+    if (nameSel && masters.character) {
+        const uniqueNames = [...new Set(masters.character.map(c => c.char_name))];
+        nameSel.innerHTML = '<option value="">選択してください</option>' + 
+            uniqueNames.map(n => `<option value="${n}">${n}</option>`).join('');
+        document.getElementById('edit-character-costume').innerHTML = '<option value="">選択してください</option>';
+    }
 }
 
 function setupMiscEvents() {
+    document.getElementById('edit-character-name').addEventListener('change', (e) => {
+        const selectedName = e.target.value;
+        const costumeSel = document.getElementById('edit-character-costume');
+        const hiddenChar = document.getElementById('edit-character');
+        
+        if (!selectedName) {
+            costumeSel.innerHTML = '<option value="">選択してください</option>';
+            hiddenChar.value = '';
+            return;
+        }
+        
+        const costumes = masters.character.filter(c => c.char_name === selectedName);
+        costumeSel.innerHTML = costumes.map(c => `<option value="${c.char_id}">${c.costume_name || 'デフォルト'}</option>`).join('');
+        hiddenChar.value = costumeSel.value;
+    });
+
+    document.getElementById('edit-character-costume').addEventListener('change', (e) => {
+        document.getElementById('edit-character').value = e.target.value;
+    });
     document.getElementById('btn-close-panel').addEventListener('click', () => {
         document.getElementById('side-panel').classList.add('translate-x-full');
     });
@@ -1145,39 +1221,16 @@ function setupMiscEvents() {
         renderGantt();
     });
     
+    // els.ganttTasks.addEventListener('dblclick', (e) => {
+    // ダブルクリックによるエディタ展開は廃止（コンテキストメニューに移行）
     els.ganttTasks.addEventListener('dblclick', (e) => {
-        const taskEl = e.target.closest('.gantt-task-item');
-        const groupEl = e.target.closest('[onclick^="toggleGroup"]'); // 親バー
-        
-        if (taskEl) {
-            openEditor(taskEl.getAttribute('data-task-id'), 'task');
-        } else if (groupEl) {
-            const match = groupEl.getAttribute('onclick').match(/toggleGroup\('([^']+)'\)/);
-            if (match && match[1]) {
-                const groupId = match[1];
-                const group = ganttConfig.groups.find(g => g.id === groupId);
-                if (group) {
-                    openEditor(group, 'group');
-                }
-            }
-        } else {
-            const rect = els.ganttBodyContent.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            const dateObj = xToDate(mouseX).toDate();
-            const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
-            if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-                const group = ganttConfig.groups[rowIndex];
-                if (group.type === 'lane') {
-                    openEditorNew(group.id, dateObj);
-                }
-            }
-        }
+        // 何もしない、または必要であれば他の処理
     });
 
     els.ganttBody.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         const taskEl = e.target.closest('.gantt-task-item');
+        
         if (taskEl) {
             currentTaskContextId = taskEl.getAttribute('data-task-id');
             document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
@@ -1192,16 +1245,60 @@ function setupMiscEvents() {
         
         lastMouseTime = xToDate(mouseX).toDate();
         const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
+        let hoveredGroup = null;
         if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
             lastMouseGroup = ganttConfig.groups[rowIndex].id;
+            hoveredGroup = ganttConfig.groups[rowIndex];
+        } else {
+            lastMouseGroup = null;
         }
 
         const contextMenu = document.getElementById('context-menu');
         if (contextMenu) {
+            // 全てのメニューアイテムを表示し、一旦有効化する
+            contextMenu.querySelectorAll('.menu-item').forEach(el => {
+                el.classList.remove('hidden');
+                el.classList.remove('opacity-50', 'pointer-events-none');
+            });
+
+            // 状態に応じてグレーアウト（無効化）する
+            if (currentTaskContextId) {
+                // タスク上の場合: タスク作成・ペーストを無効化
+                contextMenu.querySelectorAll('#ctx-create-task, #ctx-paste').forEach(el => el.classList.add('opacity-50', 'pointer-events-none'));
+            } else {
+                // 空白（レーン上等）の場合: 編集・タスク関連操作を無効化
+                contextMenu.querySelectorAll('.ctx-item-edit, .ctx-item-task').forEach(el => el.classList.add('opacity-50', 'pointer-events-none'));
+                // ペーストはコピーされたタスクがない場合は無効化
+                if (!copiedTaskRaw) {
+                    document.getElementById('ctx-paste').classList.add('opacity-50', 'pointer-events-none');
+                }
+            }
+
             contextMenu.style.left = e.pageX + 'px';
             contextMenu.style.top = e.pageY + 'px';
             contextMenu.classList.remove('hidden');
         }
+    });
+
+    // コンテキストメニューのアクション追加
+    document.getElementById('ctx-edit')?.addEventListener('click', () => {
+        if (currentTaskContextId) {
+            openEditor(currentTaskContextId, 'task');
+        } else if (lastMouseGroup) {
+            const group = ganttConfig.groups.find(g => g.id === lastMouseGroup);
+            if (group && (group.type === 'release' || group.type === 'character')) {
+                openEditor(group, 'group');
+            }
+        }
+        document.getElementById('context-menu').classList.add('hidden');
+    });
+
+    document.getElementById('ctx-create-task')?.addEventListener('click', () => {
+        if (lastMouseTime) {
+            // 行が存在しない空白部分でも作成可能にするため、lastMouseGroupがなくても開く
+            openEditorNew(lastMouseGroup || null, lastMouseTime);
+        }
+        document.getElementById('context-menu').classList.add('hidden');
     });
 
     document.addEventListener('click', (e) => {

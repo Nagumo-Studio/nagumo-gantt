@@ -48,15 +48,7 @@
         <!-- Gantt Container (完全自作) -->
         <div id="gantt-container" class="flex flex-1 overflow-hidden bg-white relative">
             
-            <!-- 左側：ツリーラベルエリア（非表示だがDOMは維持しておくか、完全に消すか）-->
-            <div id="gantt-left" class="hidden w-64 flex-shrink-0 border-r bg-white flex flex-col z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] relative">
-                <div id="gantt-left-header" class="h-16 border-b border-gray-300 bg-gray-100 flex items-center px-4 font-bold text-gray-700">タスク階層</div>
-                <div id="gantt-left-body" class="flex-1 overflow-hidden relative bg-white">
-                    <div id="gantt-left-content" class="absolute top-0 left-0 w-full transition-transform duration-75"></div>
-                </div>
-            </div>
-            
-            <!-- 右側：タイムラインエリア -->
+            <!-- タイムラインエリア（全画面） -->
             <div id="gantt-right" class="flex-1 flex flex-col relative bg-white overflow-hidden">
                 <!-- タイムラインヘッダー（日付スケール＋稼働Line数） -->
                 <div id="gantt-header" class="h-[120px] border-b border-gray-300 bg-gray-50 flex-shrink-0 overflow-hidden relative select-none">
@@ -100,8 +92,11 @@
                 </div>
 
                 <div id="editor-field-character">
-                    <label class="block font-bold mb-1">キャラクター</label>
-                    <select id="edit-character" class="w-full border rounded p-2"></select>
+                    <label class="block font-bold mb-1">キャラクター名</label>
+                    <select id="edit-character-name" class="w-full border rounded p-2 mb-2"></select>
+                    <label class="block font-bold mb-1">衣装名</label>
+                    <select id="edit-character-costume" class="w-full border rounded p-2"></select>
+                    <input type="hidden" id="edit-character">
                 </div>
 
                 <div id="editor-field-section">
@@ -166,8 +161,14 @@
         </div>
 
         <!-- Context Menu -->
-        <div id="context-menu" class="absolute bg-white border shadow-lg rounded hidden z-50 py-1 w-40">
-            <div class="relative group">
+        <div id="context-menu" class="absolute bg-white border shadow-lg rounded hidden z-50 py-1 w-48">
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-edit" id="ctx-edit">編集 / 開く</div>
+            
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-empty" id="ctx-create-task">タスクの作成</div>
+            
+            <div class="border-t my-1 menu-item ctx-separator-1"></div>
+            
+            <div class="relative group menu-item ctx-item-task" id="ctx-progress">
                 <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer font-bold text-gray-700 flex justify-between items-center">
                     <span>進捗変更</span><span>▶</span>
                 </div>
@@ -180,11 +181,15 @@
                     <div class="px-4 py-2 hover:bg-green-100 cursor-pointer context-progress" data-progress="100">100% (完了)</div>
                 </div>
             </div>
-            <div class="border-t my-1"></div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700" id="ctx-copy">コピー (Ctrl+C)</div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700" id="ctx-paste">ペースト (Ctrl+V)</div>
-            <div class="border-t my-1"></div>
-            <div class="px-4 py-2 hover:bg-red-100 cursor-pointer font-bold text-red-600" id="ctx-delete">削除 (Delete)</div>
+            
+            <div class="border-t my-1 menu-item ctx-separator-2"></div>
+            
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-task" id="ctx-copy">コピー (Ctrl+C)</div>
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-empty" id="ctx-paste">ペースト (Ctrl+V)</div>
+            
+            <div class="border-t my-1 menu-item ctx-separator-3"></div>
+            
+            <div class="px-4 py-2 hover:bg-red-100 cursor-pointer font-bold text-red-600 menu-item ctx-item-task" id="ctx-delete">削除 (Delete)</div>
         </div>
     </div>
 
