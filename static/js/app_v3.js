@@ -50,10 +50,12 @@ const els = {
 };
 
 let currentTaskContextId = null;
+let selectedTaskIds = new Set();
 let lastMouseTime = null;
 let lastMouseGroup = null;
 let currentHoverDate = null;
 let currentHoverGroup = null;
+let insertTargetIndex = -1; // 新規タスク挿入位置
 
 // --- Initialization ---
 async function init() {
@@ -371,7 +373,37 @@ function getMasterItem(type, idField, id) {
 }
 
 // --- Rendering ---
+let currentFilteredTasks = [];
+
+function updateFilteredTasks() {
+    const filterTextElem = document.getElementById('filter-text');
+    const filterQuery = filterTextElem && filterTextElem.value.trim() !== '' ? filterTextElem.value.trim().toLowerCase() : '';
+    
+    const selectedMembers = window.getSelectedMembers ? window.getSelectedMembers() : [];
+    
+    const filterHideCompletedElem = document.getElementById('filter-hide-completed');
+    const hideCompleted = filterHideCompletedElem && filterHideCompletedElem.checked;
+
+    currentFilteredTasks = allTasksRaw.filter(t => {
+        if (hideCompleted && parseInt(t.progress) === 100) return false;
+        if (selectedMembers.length > 0 && !selectedMembers.includes(t.member_id)) return false;
+        
+        if (filterQuery !== '') {
+            const charName = t.char_id ? getMasterItem('character', 'char_id', t.char_id)?.char_name || '' : '';
+            const relName = t.release_id ? getMasterItem('release', 'release_id', t.release_id)?.release_name || '' : '';
+            const memberName = t.member_id ? getMasterItem('member', 'member_id', t.member_id)?.member_name || '' : '';
+            const sectionName = t.section_id ? getMasterItem('section', 'section_id', t.section_id)?.section_name || '' : '';
+            
+            const searchTarget = `${t.task_name} ${charName} ${relName} ${memberName} ${sectionName}`.toLowerCase();
+            if (!searchTarget.includes(filterQuery)) return false;
+        }
+        return true;
+    });
+}
+
 function renderGantt() {
+    updateFilteredTasks();
+    
     ganttConfig.totalDays = ganttConfig.endDate.diff(ganttConfig.startDate, 'days');
     const totalWidth = ganttConfig.totalDays * ganttConfig.dayWidth;
     
@@ -395,7 +427,7 @@ function buildGroupsList() {
     const activeReleases = new Set();
     const activeChars = new Set();
     
-    allTasksRaw.forEach(t => {
+    currentFilteredTasks.forEach(t => {
         if (t.release_id) activeReleases.add(t.release_id);
         if (t.release_id && t.char_id) activeChars.add(`${t.release_id}_${t.char_id}`);
     });
@@ -410,9 +442,19 @@ function buildGroupsList() {
         
         if (ganttConfig.collapsedGroups.has(relId)) return;
 
-        masters.character.forEach(char => {
+        // タスクの配列順（登場順）でキャラクターの表示順を決定する
+        const charsInThisRelease = [];
+        const seenChars = new Set();
+        currentFilteredTasks.forEach(t => {
+            if (t.release_id === relId && t.char_id && !seenChars.has(t.char_id)) {
+                seenChars.add(t.char_id);
+                const charObj = masters.character.find(c => c.char_id === t.char_id);
+                if (charObj) charsInThisRelease.push(charObj);
+            }
+        });
+
+        charsInThisRelease.forEach(char => {
             const charId = `${rel.release_id}_${char.char_id}`;
-            if (!activeChars.has(charId)) return;
 
             ganttConfig.groups.push({
                 id: charId, type: 'character', name: `${char.char_name} (${char.costume_name})`, parentId: relId, level: 1, raw: char
@@ -420,7 +462,61 @@ function buildGroupsList() {
             
             if (ganttConfig.collapsedGroups.has(charId)) return;
             
-            for (let i = 1; i <= 3; i++) {
+            // 対象キャラクターのタスクを抽出してテトリススタックをシミュレーションし、必要な行数（Lane数）を計算する
+            const charTasks = currentFilteredTasks.filter(t => t.release_id === relId && t.char_id === char.char_id);
+            const sortedCharTasks = [...charTasks].sort((a, b) => moment(a.start_date).diff(moment(b.start_date)));
+            
+            // 実際に使用されているlaneを抽出し、空行を飛ばして連番にマッピングする
+            const usedLanes = new Set();
+            sortedCharTasks.forEach(t => {
+                const laneIdx = parseInt(t.lane) || 1;
+                usedLanes.add(laneIdx);
+            });
+            
+            const sortedUsedLanes = Array.from(usedLanes).sort((a, b) => a - b);
+            const laneMapping = {};
+            sortedUsedLanes.forEach((oldLane, idx) => {
+                laneMapping[oldLane] = idx + 1; // 1からの連番に詰める
+            });
+            
+            // 詰め直したLaneごとにテトリススタックを計算し、必要な行数を割り出す
+            const laneStacks = {};
+            let maxLaneNeeded = 1;
+            
+            sortedCharTasks.forEach(t => {
+                const oldLaneIdx = parseInt(t.lane) || 1;
+                const mappedLaneIdx = laneMapping[oldLaneIdx] || 1;
+                
+                const startM = moment(t.start_date).startOf('day');
+                const endM = moment(t.end_date).add(1, 'days').startOf('day');
+                const x = startM.valueOf();
+                const endX = endM.valueOf();
+                
+                if (!laneStacks[mappedLaneIdx]) laneStacks[mappedLaneIdx] = [];
+                let level = 0;
+                for (let i = 0; i < laneStacks[mappedLaneIdx].length; i++) {
+                    if (laneStacks[mappedLaneIdx][i] <= x) {
+                        level = i;
+                        break;
+                    }
+                    level = i + 1;
+                }
+                laneStacks[mappedLaneIdx][level] = endX;
+                
+                // mappedLaneIdxを基準に、はみ出たlevel分を加算
+                const neededForThisTask = mappedLaneIdx + level;
+                if (neededForThisTask > maxLaneNeeded) {
+                    maxLaneNeeded = neededForThisTask;
+                }
+            });
+            
+            // 少なくとも1行は表示する。
+            const requiredLanes = Math.max(1, maxLaneNeeded);
+            
+            // mapping情報をキャラクターグループのrawに持たせておく（renderTasksで使うため）
+            char.laneMapping = laneMapping;
+            
+            for (let i = 1; i <= requiredLanes; i++) {
                 const laneId = `${charId}_LANE${i}`;
                 ganttConfig.groups.push({
                     id: laneId, type: 'lane', name: `Lane ${i}`, parentId: charId, level: 2
@@ -587,45 +683,17 @@ function renderTasks() {
     const margin = 4 * ganttConfig.uiScale;
 
     const laneStacks = {};
-    // フィルターの取得
-    const filterTextElem = document.getElementById('filter-text');
-    const filterQuery = filterTextElem && filterTextElem.value.trim() !== '' ? filterTextElem.value.trim().toLowerCase() : '';
     
-    // TODO: カスタムの担当者マルチセレクトからの選択値取得
-    // 一旦既存の単一選択をサポートしつつ、後で配列対応する
-    const filterMemberElem = document.getElementById('filter-member');
-    const selectedMembers = window.getSelectedMembers ? window.getSelectedMembers() : (filterMemberElem && filterMemberElem.value ? [filterMemberElem.value] : []);
-    
-    const filterHideCompletedElem = document.getElementById('filter-hide-completed');
-    const hideCompleted = filterHideCompletedElem && filterHideCompletedElem.checked;
-
-    // タスクのフィルタリング
-    const filteredTasks = allTasksRaw.filter(t => {
-        // 完了済み非表示
-        if (hideCompleted && parseInt(t.progress) === 100) return false;
-        
-        // 担当者フィルター（複数選択）
-        if (selectedMembers.length > 0 && !selectedMembers.includes(t.member_id)) return false;
-        
-        // テキスト検索（全項目部分一致）
-        if (filterQuery !== '') {
-            const charName = t.char_id ? getMasterItem('character', 'char_id', t.char_id)?.char_name || '' : '';
-            const relName = t.release_id ? getMasterItem('release', 'release_id', t.release_id)?.release_name || '' : '';
-            const memberName = t.member_id ? getMasterItem('member', 'member_id', t.member_id)?.member_name || '' : '';
-            const sectionName = t.section_id ? getMasterItem('section', 'section_id', t.section_id)?.section_name || '' : '';
-            
-            const searchTarget = `${t.task_name} ${charName} ${relName} ${memberName} ${sectionName}`.toLowerCase();
-            if (!searchTarget.includes(filterQuery)) return false;
-        }
-        
-        return true;
-    });
-
-    const sortedTasks = [...filteredTasks].sort((a, b) => moment(a.start_date).diff(moment(b.start_date)));
-
+    const sortedTasks = [...currentFilteredTasks].sort((a, b) => moment(a.start_date).diff(moment(b.start_date)));
     sortedTasks.forEach(t => {
-        const lane = t.lane || '1';
-        const parentId = `${t.release_id}_${t.char_id}_LANE${lane}`;
+        const oldLaneIdx = parseInt(t.lane) || 1;
+        // マッピングから描画上のLaneを取得。見つからなければそのまま。
+        let mappedLane = oldLaneIdx;
+        const charGroup = ganttConfig.groups.find(g => g.type === 'character' && g.id === `${t.release_id}_${t.char_id}`);
+        if (charGroup && charGroup.raw && charGroup.raw.laneMapping) {
+            mappedLane = charGroup.raw.laneMapping[oldLaneIdx] || oldLaneIdx;
+        }
+        const parentId = `${t.release_id}_${t.char_id}_LANE${mappedLane}`;
         
         if (ganttConfig.collapsedGroups.has(t.release_id) || ganttConfig.collapsedGroups.has(`${t.release_id}_${t.char_id}`)) return;
         
@@ -658,7 +726,7 @@ function renderTasks() {
         
         const taskTop = y + (level * (taskHeight + margin)) + (ganttConfig.rowHeight - taskHeight) / 2;
         const completedClass = progress === 100 ? 'completed' : '';
-        const selectedClass = (typeof currentTaskContextId !== 'undefined' && currentTaskContextId === t.task_id) ? 'selected' : '';
+        const selectedClass = (selectedTaskIds.has(t.task_id) || (typeof currentTaskContextId !== 'undefined' && currentTaskContextId === t.task_id)) ? 'selected' : '';
         
         html += `
             <div class="gantt-task-item ${completedClass} ${selectedClass}" data-task-id="${t.task_id}" style="left:${x}px; top:${taskTop}px; width:${width}px; height:${taskHeight}px; z-index:20;">
@@ -674,7 +742,7 @@ function renderTasks() {
 
     const parentGroups = ganttConfig.groups.filter(g => g.type === 'release' || g.type === 'character');
     parentGroups.forEach(g => {
-        const childTasks = filteredTasks.filter(t => {
+        const childTasks = currentFilteredTasks.filter(t => {
             if (g.type === 'release') return t.release_id === g.raw.release_id;
             if (g.type === 'character') return t.release_id === g.parentId && t.char_id === g.raw.char_id;
             return false;
@@ -742,7 +810,7 @@ function renderTasks() {
         const artDeadline = rel.art_deadline;
         if (!artDeadline) return;
 
-        const charTasks = filteredTasks.filter(t => t.release_id === g.parentId && t.char_id === g.raw.char_id);
+        const charTasks = currentFilteredTasks.filter(t => t.release_id === g.parentId && t.char_id === g.raw.char_id);
         const activeSectionIds = new Set(charTasks.map(t => t.section_id));
 
         // 対象キャラクターグループの表示領域（Y座標と高さ）を計算
@@ -973,6 +1041,25 @@ function setupMouseTracking() {
         const taskId = taskEl.getAttribute('data-task-id');
         const taskRaw = allTasksRaw.find(t => t.task_id === taskId);
         if (!taskRaw) return;
+        
+        // 複数選択の処理
+        if (e.ctrlKey || e.metaKey) {
+            if (selectedTaskIds.has(taskId)) {
+                selectedTaskIds.delete(taskId);
+                taskEl.classList.remove('selected');
+                return; // ドラッグ開始しない
+            } else {
+                selectedTaskIds.add(taskId);
+                taskEl.classList.add('selected');
+            }
+        } else {
+            if (!selectedTaskIds.has(taskId)) {
+                selectedTaskIds.clear();
+                document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
+                selectedTaskIds.add(taskId);
+                taskEl.classList.add('selected');
+            }
+        }
 
         dragState.isDragging = true;
         dragState.taskId = taskId;
@@ -985,13 +1072,26 @@ function setupMouseTracking() {
         dragState.initialTop = parseFloat(taskEl.style.top);
         dragState.initialWidth = parseFloat(taskEl.style.width);
         
+        dragState.selectedTasks = Array.from(selectedTaskIds).map(id => {
+            const el = document.querySelector(`.gantt-task-item[data-task-id="${id}"]`);
+            return {
+                id: id,
+                element: el,
+                initialLeft: el ? parseFloat(el.style.left) : 0,
+                initialTop: el ? parseFloat(el.style.top) : 0,
+                initialWidth: el ? parseFloat(el.style.width) : 0
+            };
+        }).filter(t => t.element);
+        
         if (handle) {
             dragState.mode = handle.getAttribute('data-action');
         } else {
             dragState.mode = 'move';
         }
         
-        taskEl.style.zIndex = '100';
+        dragState.selectedTasks.forEach(st => {
+            st.element.style.zIndex = '100';
+        });
         document.body.style.cursor = dragState.mode === 'move' ? 'move' : 'ew-resize';
         
         els.crosshairCol.classList.add('hidden');
@@ -1014,11 +1114,13 @@ function setupMouseTracking() {
         const dy = e.clientY - dragState.startY;
         
         if (dragState.mode === 'move') {
-            const rawLeft = dragState.initialLeft + dx;
-            const rawTop = dragState.initialTop + dy;
-            const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
-            dragState.element.style.left = `${snappedLeft}px`;
-            dragState.element.style.top = `${rawTop}px`;
+            dragState.selectedTasks.forEach(st => {
+                const rawLeft = st.initialLeft + dx;
+                const rawTop = st.initialTop + dy;
+                const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+                st.element.style.left = `${snappedLeft}px`;
+                st.element.style.top = `${rawTop}px`;
+            });
         } else if (dragState.mode === 'move-deadline') {
             const rawLeft = dragState.initialLeft + dx;
             const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
@@ -1053,10 +1155,13 @@ function setupMouseTracking() {
         const isClick = (dx < 3 && dy < 3);
 
         if (isClick) {
+            if (!e.ctrlKey && !e.metaKey) {
+                selectedTaskIds.clear();
+                document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
+                selectedTaskIds.add(dragState.taskId);
+                if (dragState.element) dragState.element.classList.add('selected');
+            }
             currentTaskContextId = dragState.taskId;
-            // renderGantt()でDOMを破壊するとdblclickイベントが発火しなくなるため、手動でクラスを操作する
-            document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
-            if (dragState.element) dragState.element.classList.add('selected');
             
             dragState.isDragging = false;
             dragState.element = null;
@@ -1094,36 +1199,39 @@ function setupMouseTracking() {
             return;
         }
 
-        const taskRaw = allTasksRaw.find(t => t.task_id === dragState.taskId);
-        
-        if (taskRaw) {
+        if (dragState.selectedTasks && dragState.selectedTasks.length > 0) {
             saveHistory();
             
-            const finalLeft = parseFloat(dragState.element.style.left);
-            const finalWidth = parseFloat(dragState.element.style.width);
-            const finalTop = parseFloat(dragState.element.style.top);
-            
-            const newStartM = xToDate(finalLeft).startOf('day');
-            const newEndM = xToDate(finalLeft + finalWidth).subtract(1, 'milliseconds').startOf('day');
-            
-            taskRaw.start_date = newStartM.format('YYYY-MM-DD');
-            taskRaw.end_date = newEndM.format('YYYY-MM-DD');
-            
-            if (dragState.mode === 'move') {
-                const centerTop = finalTop + (24 * ganttConfig.uiScale) / 2;
-                const rowIndex = Math.floor(centerTop / ganttConfig.rowHeight);
-                if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-                    const targetGroup = ganttConfig.groups[rowIndex];
-                    if (targetGroup.type === 'lane') {
-                        const parts = targetGroup.id.split('_');
-                        if (parts.length >= 4) {
-                            taskRaw.release_id = parts[0] + '_' + parts[1];
-                            taskRaw.char_id = parts[2] + '_' + parts[3];
-                            taskRaw.lane = parts[4] ? parts[4].replace('LANE', '') : '1';
+            dragState.selectedTasks.forEach(st => {
+                const raw = allTasksRaw.find(t => t.task_id === st.id);
+                if (!raw) return;
+                
+                const finalLeft = parseFloat(st.element.style.left);
+                const finalWidth = parseFloat(st.element.style.width);
+                const finalTop = parseFloat(st.element.style.top);
+                
+                const newStartM = xToDate(finalLeft).startOf('day');
+                const newEndM = xToDate(finalLeft + finalWidth).subtract(1, 'milliseconds').startOf('day');
+                
+                raw.start_date = newStartM.format('YYYY-MM-DD');
+                raw.end_date = newEndM.format('YYYY-MM-DD');
+                
+                if (dragState.mode === 'move') {
+                    const centerTop = finalTop + (24 * ganttConfig.uiScale) / 2;
+                    const rowIndex = Math.floor(centerTop / ganttConfig.rowHeight);
+                    if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
+                        const targetGroup = ganttConfig.groups[rowIndex];
+                        if (targetGroup.type === 'lane') {
+                            const parts = targetGroup.id.split('_');
+                            if (parts.length >= 4) {
+                                raw.release_id = parts[0] + '_' + parts[1];
+                                raw.char_id = parts[2] + '_' + parts[3];
+                                raw.lane = parts[4] ? parts[4].replace('LANE', '') : '1';
+                            }
                         }
                     }
                 }
-            }
+            });
             
             markUnsaved();
             renderGantt();
@@ -1132,6 +1240,7 @@ function setupMouseTracking() {
         dragState.isDragging = false;
         dragState.element = null;
         dragState.taskId = null;
+        dragState.selectedTasks = null;
     });
 }
 
@@ -1286,6 +1395,33 @@ function openEditorNew(groupId, dateObj) {
     document.getElementById('edit-group-type').value = 'task';
     document.getElementById('edit-task-id').value = '';
     
+    // マウスカーソル位置（groupId）から、挿入すべき配列のインデックスを計算する
+    insertTargetIndex = -1;
+    if (groupId) {
+        const parts = groupId.split('_');
+        if (parts.length >= 2) {
+            const relId = parts[0] + '_' + parts[1];
+            // 同じリリースの最後のタスクを探す
+            for (let i = allTasksRaw.length - 1; i >= 0; i--) {
+                if (allTasksRaw[i].release_id === relId) {
+                    insertTargetIndex = i + 1; // その直後に挿入
+                    
+                    // もし charId が取れれば、そのキャラの最後のタスクの直後にする
+                    if (parts.length >= 4) {
+                        const charId = parts[2] + '_' + parts[3];
+                        for (let j = allTasksRaw.length - 1; j >= 0; j--) {
+                            if (allTasksRaw[j].release_id === relId && allTasksRaw[j].char_id === charId) {
+                                insertTargetIndex = j + 1;
+                                break;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
     const dateStr = moment(dateObj).format('YYYY-MM-DD');
     document.getElementById('edit-start').value = dateStr;
     document.getElementById('edit-end').value = dateStr;
@@ -1309,6 +1445,7 @@ function openEditorNew(groupId, dateObj) {
     document.getElementById('btn-apply-task').classList.remove('hidden');
     document.getElementById('editor-title').textContent = '新規タスク作成';
     document.getElementById('side-panel').classList.remove('translate-x-full');
+    validateTaskEditor();
 }
 
 function syncCharacterDropdowns(charId) {
@@ -1481,8 +1618,14 @@ function setupMiscEvents() {
         if (targetIdx >= 0) {
             allTasksRaw[targetIdx] = raw;
         } else {
-            allTasksRaw.push(raw);
+            if (insertTargetIndex >= 0 && insertTargetIndex <= allTasksRaw.length) {
+                allTasksRaw.splice(insertTargetIndex, 0, raw);
+            } else {
+                allTasksRaw.push(raw);
+            }
         }
+        
+        insertTargetIndex = -1;
 
         markUnsaved();
         renderGantt();
