@@ -209,4 +209,9 @@
         loadMasters();
     </script>
 </body>
+<script>
+    setInterval(() => {
+        fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
+    }, 3000);
+</script>
 </html>

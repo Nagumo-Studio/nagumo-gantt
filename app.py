@@ -73,11 +73,21 @@ def receive_log():
         print(f"\\n============================\\n[JS {data.get('type', 'INFO')}] {data.get('message', '')}\\n============================\\n")
     return jsonify({"status": "ok"})
 
+last_heartbeat = time.time()
+
+@app.route('/api/heartbeat', methods=['POST'])
+def heartbeat():
+    global last_heartbeat
+    last_heartbeat = time.time()
+    return jsonify({"status": "ok"})
+
 @app.route('/api/restart', methods=['POST'])
 def restart_server():
     print("Restart requested. Exiting current process...")
     if os.path.exists('WBSツール起動.bat'):
+        # startコマンドで新しいウィンドウを開く
         os.system('start "" "WBSツール起動.bat"')
+    # 自プロセスを終了（コマンドプロンプトも連動して閉じる）
     os._exit(0)
     return jsonify({"status": "ok"})
 
@@ -149,6 +159,27 @@ def save_tasks():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/api/deadlines', methods=['GET'])
+def get_deadlines():
+    project_name = request.args.get('project', 'Sample')
+    p_dir = get_project_dir(project_name)
+    filepath = os.path.join(p_dir, 't_section_deadlines.csv')
+    deadlines = read_csv_as_dicts(filepath)
+    return jsonify(deadlines)
+
+@app.route('/api/deadlines/save', methods=['POST'])
+def save_deadlines():
+    try:
+        project_name = request.args.get('project', 'Sample')
+        p_dir = get_project_dir(project_name)
+        data = request.json
+        filepath = os.path.join(p_dir, 't_section_deadlines.csv')
+        fieldnames = ['release_id', 'char_id', 'section_id', 'deadline_date']
+        write_dicts_to_csv(filepath, fieldnames, data)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/masters/save', methods=['POST'])
 def save_masters():
     try:
@@ -200,8 +231,19 @@ if __name__ == '__main__':
         except Exception:
             webbrowser.open(url)
         
+    def check_heartbeat():
+        global last_heartbeat
+        time.sleep(15)  # 初回起動時の猶予
+        while True:
+            time.sleep(3)
+            # 10秒以上ハートビートがなければブラウザが閉じられたとみなして終了
+            if time.time() - last_heartbeat > 10:
+                print("Browser closed. Exiting server...")
+                os._exit(0)
+
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
         threading.Thread(target=open_browser, daemon=True).start()
+        threading.Thread(target=check_heartbeat, daemon=True).start()
 
     if getattr(sys, 'frozen', False):
         app.run(debug=False, port=PORT)

@@ -22,6 +22,7 @@ let historyStack = [];
 let redoStack = [];
 let isUndoRedoAction = false;
 let copiedTaskRaw = null;
+let deadlinesRaw = [];
 
 // Gantt State
 let ganttConfig = {
@@ -230,12 +231,18 @@ async function fetchTasks() {
     allTasksRaw = Array.from(uniqueMap.values());
 }
 
+async function fetchDeadlines() {
+    const res = await fetch(`/api/deadlines?project=${currentProject}`);
+    deadlinesRaw = await res.json();
+}
+
 async function reloadData() {
     historyStack = [];
     redoStack = [];
     updateUndoRedoButtons();
     await fetchMasters();
     await fetchTasks();
+    await fetchDeadlines();
     renderGantt();
 }
 
@@ -594,7 +601,8 @@ function renderTasks() {
             if (g.type === 'character') return t.release_id === g.parentId && t.char_id === g.raw.char_id;
             return false;
         });
-        if (childTasks.length === 0) return;
+        
+        if (childTasks.length === 0 && g.type === 'character') return;
 
         let minStart = Infinity;
         let maxEnd = -Infinity;
@@ -605,7 +613,21 @@ function renderTasks() {
             if (endX > maxEnd) maxEnd = endX;
         });
 
-        if (minStart === Infinity || maxEnd === -Infinity) return;
+        if (g.type === 'release') {
+            const rel = g.raw;
+            if (rel.art_deadline) {
+                maxEnd = moment(rel.art_deadline).add(1, 'days').startOf('day').valueOf();
+            }
+            if (minStart === Infinity) {
+                if (rel.art_deadline) {
+                    minStart = moment(rel.art_deadline).subtract(1, 'months').startOf('day').valueOf();
+                } else {
+                    return;
+                }
+            }
+        } else {
+            if (minStart === Infinity || maxEnd === -Infinity) return;
+        }
 
         const startM = moment(minStart);
         const endM = moment(maxEnd);
@@ -630,6 +652,67 @@ function renderTasks() {
                 <span class="truncate" style="font-size:calc(12px * var(--ui-scale, 1));">${g.name}</span>
             </div>
         `;
+    });
+
+    // --- Render Milestones (Deadlines) ---
+    // キャラクターグループごとにセクションの〆切を描画
+    const charGroups = ganttConfig.groups.filter(g => g.type === 'character' && !ganttConfig.collapsedGroups.has(g.id) && !ganttConfig.collapsedGroups.has(g.parentId));
+    charGroups.forEach(g => {
+        const rel = getMasterItem('release', 'release_id', g.parentId);
+        if (!rel) return;
+        
+        const artDeadline = rel.art_deadline;
+        if (!artDeadline) return;
+
+        const charTasks = allTasksRaw.filter(t => t.release_id === g.parentId && t.char_id === g.raw.char_id);
+        const activeSectionIds = new Set(charTasks.map(t => t.section_id));
+
+        // 対象キャラクターグループの表示領域（Y座標と高さ）を計算
+        // Laneは3つある想定
+        const charY = groupY[g.id];
+        const lanes = ganttConfig.groups.filter(child => child.type === 'lane' && child.parentId === g.id);
+        if (lanes.length === 0) return;
+        const groupHeight = (lanes.length + 1) * ganttConfig.rowHeight; // キャラバー + レーン
+        
+        // 縦線とマーカーの配置状態（重なり回避用）
+        const markerPositions = {}; // key: date string, value: count
+        
+        masters.section.forEach(sec => {
+            if (!activeSectionIds.has(sec.section_id)) return; // そのキャラクターに該当セクションのタスクが存在する場合のみ生成
+            
+            const filterId = document.getElementById('filter-section') ? document.getElementById('filter-section').value : '';
+            if (filterId && filterId !== sec.section_id) return;
+
+            let dateStr = artDeadline;
+            let dData = deadlinesRaw.find(d => d.release_id === g.parentId && d.char_id === g.raw.char_id && d.section_id === sec.section_id);
+            if (dData && dData.deadline_date) {
+                dateStr = dData.deadline_date;
+            }
+            
+            if (!markerPositions[dateStr]) markerPositions[dateStr] = 0;
+            const staggerLevel = markerPositions[dateStr]++;
+            
+            const x = dateToX(moment(dateStr));
+            const color = sec.color || '#ff0000';
+            
+            // 縦線 (レーン部分を貫く)
+            html += `
+                <div class="absolute gantt-deadline-line" data-section-id="${sec.section_id}" data-date="${dateStr}"
+                     style="left:${x}px; top:${charY + ganttConfig.rowHeight}px; width:4px; height:${groupHeight - ganttConfig.rowHeight}px; background-color:${color}; opacity: 0.6; z-index: 10;"></div>
+            `;
+            
+            // ▼マーカー（ドラッグ可能）
+            // キャラクターバーの真下の行（Lane 1）の上部に配置。スタッガーして重なりを回避
+            const markerTop = charY + ganttConfig.rowHeight + (staggerLevel * 14 * ganttConfig.uiScale);
+            
+            html += `
+                <div class="absolute gantt-deadline-marker cursor-pointer flex flex-col items-center justify-center select-none"
+                     data-release-id="${g.parentId}" data-char-id="${g.raw.char_id}" data-section-id="${sec.section_id}" data-date="${dateStr}"
+                     style="left:${x - 6}px; top:${markerTop}px; width:16px; height:16px; z-index:25; color:${color}; font-size:16px; text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;">
+                    ▼
+                </div>
+            `;
+        });
     });
 
     els.ganttTasks.innerHTML = html;
@@ -672,7 +755,7 @@ function setupMouseTracking() {
     els.taskTooltip = taskTooltip;
 
     els.ganttBody.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.gantt-task-item') || e.target.closest('.gantt-resize-handle')) return;
+        if (e.target.closest('.gantt-task-item') || e.target.closest('.gantt-resize-handle') || e.target.closest('.gantt-deadline-marker')) return;
         if (e.button !== 0) return;
         
         panState.isPanning = true;
@@ -721,6 +804,9 @@ function setupMouseTracking() {
         currentHoverDate = dateM.toDate();
 
         const hoveredTask = e.target.closest('.gantt-task-item');
+        const hoveredMarker = e.target.closest('.gantt-deadline-marker');
+        const hoveredLine = e.target.closest('.gantt-deadline-line');
+        
         if (hoveredTask && els.taskTooltip) {
             const taskId = hoveredTask.getAttribute('data-task-id');
             const t = allTasksRaw.find(x => x.task_id === taskId);
@@ -730,17 +816,44 @@ function setupMouseTracking() {
                 const secName = section ? section.section_name : '未定';
                 const memName = member ? member.member_name : '未定';
                 
+                let bizDays = 0;
+                const startM = moment(t.start_date).startOf('day');
+                const endM = moment(t.end_date).startOf('day');
+                for (let m = startM.clone(); m.isSameOrBefore(endM); m.add(1, 'days')) {
+                    const dStr = m.format('YYYY-MM-DD');
+                    const dayOfWeek = m.day();
+                    const masterHoliday = masters.holiday ? masters.holiday.find(h => h.holiday_date === dStr) : null;
+                    if (masterHoliday || dayOfWeek === 0 || dayOfWeek === 6) continue;
+                    bizDays++;
+                }
+                
                 document.getElementById('task-detail-header').innerText = t.task_name;
                 document.getElementById('task-detail-body').innerHTML = `
                     <div>セクション: ${secName}</div>
                     <div>担当者: ${memName}</div>
                     <div>期間: ${t.start_date} 〜 ${t.end_date}</div>
+                    <div>予定工数: ${bizDays} 営業日</div>
                     <div>進捗: ${t.progress || 0}%</div>
                 `;
                 els.taskTooltip.style.left = `${e.clientX + 15}px`;
                 els.taskTooltip.style.top = `${e.clientY + 15}px`;
                 els.taskTooltip.classList.remove('hidden');
             }
+        } else if ((hoveredMarker || hoveredLine) && els.taskTooltip) {
+            const el = hoveredMarker || hoveredLine;
+            const secId = el.getAttribute('data-section-id');
+            const dateStr = el.getAttribute('data-date');
+            const section = getMasterItem('section', 'section_id', secId);
+            const secName = section ? section.section_name : '未定';
+            
+            document.getElementById('task-detail-header').innerText = `${secName} 〆切`;
+            document.getElementById('task-detail-body').innerHTML = `
+                <div>対象セクション: ${secName}</div>
+                <div>〆切日: ${dateStr}</div>
+            `;
+            els.taskTooltip.style.left = `${e.clientX + 15}px`;
+            els.taskTooltip.style.top = `${e.clientY + 15}px`;
+            els.taskTooltip.classList.remove('hidden');
         } else {
             if (els.taskTooltip) els.taskTooltip.classList.add('hidden');
         }
@@ -756,10 +869,28 @@ function setupMouseTracking() {
     els.ganttTasks.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         
+        const deadlineMarker = e.target.closest('.gantt-deadline-marker');
+        if (deadlineMarker) {
+            e.preventDefault(); // ネイティブドラッグを防止
+            dragState.isDragging = true;
+            dragState.mode = 'move-deadline';
+            dragState.element = deadlineMarker;
+            dragState.startX = e.clientX;
+            dragState.startY = e.clientY;
+            dragState.initialLeft = parseFloat(deadlineMarker.style.left) + 6; // +6 to adjust for -6px offset
+            dragState.releaseId = deadlineMarker.getAttribute('data-release-id');
+            dragState.charId = deadlineMarker.getAttribute('data-char-id');
+            dragState.sectionId = deadlineMarker.getAttribute('data-section-id');
+            
+            document.body.style.cursor = 'ew-resize';
+            return;
+        }
+
         const handle = e.target.closest('.gantt-resize-handle');
         const taskEl = e.target.closest('.gantt-task-item');
         
         if (!taskEl) return;
+        e.preventDefault(); // タスクのネイティブドラッグも防止
         
         const taskId = taskEl.getAttribute('data-task-id');
         const taskRaw = allTasksRaw.find(t => t.task_id === taskId);
@@ -810,6 +941,10 @@ function setupMouseTracking() {
             const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
             dragState.element.style.left = `${snappedLeft}px`;
             dragState.element.style.top = `${rawTop}px`;
+        } else if (dragState.mode === 'move-deadline') {
+            const rawLeft = dragState.initialLeft + dx;
+            const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+            dragState.element.style.left = `${snappedLeft - 6}px`; // adjust offset back
         } else if (dragState.mode === 'resize-right') {
             const rawWidth = dragState.initialWidth + dx;
             const snappedWidth = Math.max(ganttConfig.dayWidth, Math.round(rawWidth / ganttConfig.dayWidth) * ganttConfig.dayWidth);
@@ -853,6 +988,34 @@ function setupMouseTracking() {
         }
 
         document.body.style.cursor = '';
+        
+        if (dragState.mode === 'move-deadline') {
+            const finalLeft = parseFloat(dragState.element.style.left) + 6;
+            const newDateM = xToDate(finalLeft).startOf('day');
+            const dateStr = newDateM.format('YYYY-MM-DD');
+            
+            // 既存のデータを検索または追加
+            let dData = deadlinesRaw.find(d => d.release_id === dragState.releaseId && d.char_id === dragState.charId && d.section_id === dragState.sectionId);
+            if (!dData) {
+                dData = {
+                    release_id: dragState.releaseId,
+                    char_id: dragState.charId,
+                    section_id: dragState.sectionId,
+                    deadline_date: dateStr
+                };
+                deadlinesRaw.push(dData);
+            } else {
+                dData.deadline_date = dateStr;
+            }
+            
+            markUnsaved();
+            renderGantt();
+            
+            dragState.isDragging = false;
+            dragState.element = null;
+            return;
+        }
+
         const taskRaw = allTasksRaw.find(t => t.task_id === dragState.taskId);
         
         if (taskRaw) {
@@ -1150,13 +1313,22 @@ function setupMiscEvents() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(allTasksRaw)
             });
+            
+            const resDeadlines = await fetch(`/api/deadlines/save?project=${currentProject}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(deadlinesRaw)
+            });
+            
             const result = await res.json();
-            if (result.status === 'success') {
+            const resultDeadlines = await resDeadlines.json();
+            
+            if (result.status === 'success' && resultDeadlines.status === 'success') {
                 hasUnsavedChanges = false;
                 els.unsavedBadge.classList.add('hidden');
                 alert('保存が完了しました。');
             } else {
-                alert('エラー: ' + result.message);
+                alert('エラー: ' + result.message + ' / ' + resultDeadlines.message);
             }
         } catch(e) {
             alert('保存に失敗しました。');
