@@ -2588,7 +2588,19 @@ function setupMiscEvents() {
             if (isUser) {
                 messageHTML = `<div class="bg-blue-100 border-blue-200 border rounded-lg p-2 text-sm max-w-[90%] whitespace-pre-wrap">${escapeHTML(msg.content)}</div>`;
             } else {
-                const parsedContent = typeof marked !== 'undefined' ? marked.parse(msg.content) : escapeHTML(msg.content);
+                let parsedContent = typeof marked !== 'undefined' ? marked.parse(msg.content) : escapeHTML(msg.content);
+
+                // HTMLパース後の JSONコードブロックを折りたたみ（アコーディオン）に置換してスッキリさせる
+                const htmlJsonRegex = /<pre><code class="language-json">([\s\S]*?)<\/code><\/pre>/gi;
+                parsedContent = parsedContent.replace(htmlJsonRegex, (match, p1) => {
+                    return `
+<details class="bg-white border rounded p-2 mt-2 cursor-pointer select-none">
+  <summary class="font-bold text-xs text-blue-600 outline-none hover:text-blue-800">📋 適用された更新データ (JSON) を表示 (クリックで展開)</summary>
+  <pre class="text-xs bg-gray-50 p-2 rounded border mt-2 overflow-x-auto max-h-48 text-left"><code>${p1}</code></pre>
+</details>
+`;
+                });
+
                 messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${parsedContent}</div>`;
 
                 // メッセージテキスト内からタスク提案JSONを検出（コードブロックまたは配列の正規表現）
@@ -2682,21 +2694,83 @@ function setupMiscEvents() {
             return (ts.isSameOrBefore(eDate) && te.isSameOrAfter(sDate));
         });
 
-        // 最低限必要な項目に絞ってJSON化
+        // 最低限必要な項目に絞ってJSON化（依存関係 dep、セクションID、リリースIDも追加）
         const simpleTasks = activeTasks.map(t => ({
             id: t.task_id,
             name: t.task_name,
+            release_id: t.release_id,
             char_id: t.char_id,
+            section_id: t.section_id,
             member: masters.member.find(m => m.member_id === t.member_id)?.member_name || '未定',
             start: t.start_date,
             end: t.end_date,
-            prog: t.progress
+            prog: t.progress,
+            dep: t.dependencies || "" // 先行タスクID（カンマ区切り）
         }));
 
+        // 担当者ごとの重複（オーバーラップ）を自動検出して警告サマリーを作成
+        let overlapWarnings = "\n【担当者別・タスク期間の重複（オーバーラップ）状況】\n";
+        const tasksByMember = {};
+        simpleTasks.forEach(t => {
+            if (!tasksByMember[t.member]) {
+                tasksByMember[t.member] = [];
+            }
+            tasksByMember[t.member].push(t);
+        });
+
+        let hasOverlapTotal = false;
+        for (const memberName in tasksByMember) {
+            const mTasks = tasksByMember[memberName];
+            // 開始日順にソート
+            mTasks.sort((a, b) => moment(a.start).diff(moment(b.start)));
+            
+            let memberOverlaps = [];
+            for (let i = 0; i < mTasks.length - 1; i++) {
+                const current = mTasks[i];
+                const next = mTasks[i + 1];
+                const currentEnd = moment(current.end);
+                const nextStart = moment(next.start);
+                
+                if (nextStart.isSameOrBefore(currentEnd)) {
+                    hasOverlapTotal = true;
+                    memberOverlaps.push(`  - ⚠️ 重複あり: 「${current.name}」(ID: ${current.id}, 期間: ${current.start}〜${current.end}) と 「${next.name}」(ID: ${next.id}, 期間: ${next.start}〜${next.end}) が被っています。`);
+                }
+            }
+            if (memberOverlaps.length > 0) {
+                overlapWarnings += `- 担当者 [ ${memberName} ] :\n${memberOverlaps.join('\n')}\n`;
+            }
+        }
+        if (!hasOverlapTotal) {
+            overlapWarnings += "  - 現在、すべての担当者においてタスクの重複（被り）はありません。\n";
+        }
+
+        // アクティブなリリース情報（アート締め期限）を抽出
+        const activeReleaseIds = new Set(simpleTasks.map(t => t.release_id));
+        const activeReleasesInfo = (masters.release || [])
+            .filter(r => activeReleaseIds.has(r.release_id))
+            .map(r => ({
+                id: r.release_id,
+                name: r.release_name,
+                art_deadline: r.art_deadline // アート締め（絶対にこれを超えてタスクを配置してはならない）
+            }));
+
+        // アクティブなセクション締め（マイルストーン）情報を抽出
+        const activeDeadlines = (deadlinesRaw || [])
+            .filter(d => activeReleaseIds.has(d.release_id))
+            .map(d => ({
+                release_id: d.release_id,
+                char_id: d.char_id,
+                section_id: d.section_id,
+                deadline_date: d.deadline_date // セクション締め（絶対にこれを超えて該当セクションのタスクを配置してはならない）
+            }));
+
         let contextText = `\n--- プロジェクトコンテキスト ---\n【マスターデータ】\nキャラクター: ${JSON.stringify(masters.character.map(c=>({id:c.char_id, name:c.char_name})))}\n`;
-        contextText += `担当者: ${JSON.stringify(masters.member.map(m=>({id:m.member_id, name:m.member_name})))}\n\n`;
-        contextText += `【対象期間(${session.startDate}〜${session.endDate})のタスク】\n`;
-        contextText += JSON.stringify(simpleTasks, null, 2);
+        contextText += `担当者: ${JSON.stringify(masters.member.map(m=>({id:m.member_id, name:m.member_name})))}\n`;
+        contextText += `バージョン情報（アート締め）: ${JSON.stringify(activeReleasesInfo)}\n`;
+        contextText += `セクション締め（マイルストーン）: ${JSON.stringify(activeDeadlines)}\n\n`;
+        contextText += `【対象期間(${session.startDate}〜${session.endDate})のタスク（"dep"は先行タスクID）】\n`;
+        contextText += JSON.stringify(simpleTasks, null, 2) + "\n";
+        contextText += overlapWarnings;
         return contextText;
     }
 
@@ -2756,6 +2830,39 @@ function setupMiscEvents() {
             // 送信用システムプロンプトの構築
             let sysPrompt = aiSettings.systemPrompt || 'あなたはプロジェクト管理アシスタントです。';
             sysPrompt += getContextTextForSession(session);
+
+            // 【常時追加されるシステムコアプロンプト】
+            // ガントチャートのリアルタイムプレビューを確実に動作させ、複数キャラクター間のリソース平準化を成功させるための命令
+            sysPrompt += `
+
+【超重要指示 - WBS制御システム制約ルール（絶対厳守）】
+1. ユーザーからスケジュールの調整、平準化、延期、再構築を求められた場合、日本語での分かりやすい解説とともに、変更後のスケジュールデータを以下のJSONコードブロック（ \`\`\`json ... \`\`\` ）で必ず返答に含めて出力してください。
+
+[出力JSON形式]
+\`\`\`json
+[
+  {
+    "id": "タスクID（例: TSK_00001）",
+    "start": "新しい開始日（YYYY-MM-DD）",
+    "end": "新しい終了日（YYYY-MM-DD）"
+  }
+]
+\`\`\`
+
+2. 【絶対厳守の物理制約（1つでも破る提案は完全に無効・NGとなります）】
+- 【制約A: 先行・後続タスクの順序厳守】
+  各タスクデータの "dep" (先行タスクID) が空欄ではない場合、その後続タスクの開始日 (start) は、必ず "dep" に指定されているすべての先行タスクの終了日 (end) の「翌日以降」に配置してください。絶対に先行タスクの期間と被ったり、先行タスクが終わる前に開始してはなりません。
+- 【制約B: アート締め（art_deadline）の限界厳守】
+  バージョン情報内の「アート締め（art_deadline）」の日付を超えてスケジュールを組むことは、どのような理由があっても「絶対に禁止」です。すべてのタスクの終了日 (end) は、必ず所属するバージョンの art_deadline の日付以前（当日含む）に収めてください。これを超える提案はプログラム上でクラッシュします。
+- 【制約C: セクション締め（deadline_date）の限界厳守】
+  キャラクター・セクションごとに設定されている「セクション締め（deadline_date）」の日付以前（当日含む）に、該当セクション内の全タスクが完了するようにスケジュールを収めてください。
+
+3. 【複数グループ（キャラクター）をまたいだリソース平準化（Leveling）のルール】
+WBS全体で同一の担当者（member_id）のスケジュールに「タスク期間の重複（被り）」が発生している場合、複数のキャラクター（子グループ）やバージョン（リリース）をまたいで、それらのタスクが「絶対に重複（並行作業）しない」ように、パズルのように直列に平準化（スライド）させてください。
+- 同一担当者のタスク同士を日付順に直列にソートし、前の作業が終わった「翌日（または数日後）」に次の作業を開始するように直列化して押し出してください。
+- 押し出す際、上記の「制約A（先行後続順序）」「制約B（アート締め限界）」「制約C（セクション締め限界）」をすべて同時に満たすようにパズルしてください。
+- 対象期間における全担当者の重複（被り）状況は、上のコンテキストテキストの「タスク期間の重複状況」に詳しくリストアップされています。これをもとに、被りが完全に「0件」になるようにパズルしてください。
+`;
 
             if (currentAiMode === 'operator') {
                 sysPrompt += `
