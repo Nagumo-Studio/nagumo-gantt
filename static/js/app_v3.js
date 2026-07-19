@@ -1939,6 +1939,16 @@ function setupMiscEvents() {
         aiChatView.classList.remove('hidden');
         btnBackToSessions.classList.remove('hidden');
         
+        // セッションを開く前に、仮プレビュー（バックアップ）があれば復元し、プレビューバーを非表示にする
+        if (allTasksRawBackup) {
+            allTasksRaw = JSON.parse(JSON.stringify(allTasksRawBackup));
+            allTasksRawBackup = null;
+            renderGantt();
+        }
+        if (aiPreviewBar) {
+            aiPreviewBar.classList.add('hidden');
+        }
+        
         const sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
         const session = sessions.find(s => s.id === id);
         if (session) {
@@ -1972,6 +1982,22 @@ function setupMiscEvents() {
                     if (aiPreviewBar) {
                         aiPreviewBar.classList.add('hidden');
                     }
+
+                    // セッション内のすべてのAI提案メッセージを「適用済み」としてマーキングする
+                    if (currentSessionId) {
+                        let sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+                        const sessionIndex = sessions.findIndex(s => s.id === currentSessionId);
+                        if (sessionIndex !== -1) {
+                            const sessionMessages = sessions[sessionIndex].messages || [];
+                            sessionMessages.forEach(msg => {
+                                if (msg.role !== 'user') {
+                                    msg.isApplied = true;
+                                }
+                            });
+                            sessions[sessionIndex].isApplied = true; // 互換性のためセッションレベルも残す
+                            localStorage.setItem('ai_sessions', JSON.stringify(sessions));
+                        }
+                    }
                 } else {
                     alert('システムの保存ボタンが見つかりませんでした。');
                 }
@@ -1992,6 +2018,22 @@ function setupMiscEvents() {
                 renderGantt();
             }
             aiPreviewBar.classList.add('hidden');
+
+            // 破棄した場合も、これ以上プレビューを出さないようにマーキングする
+            if (currentSessionId) {
+                let sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+                const sessionIndex = sessions.findIndex(s => s.id === currentSessionId);
+                if (sessionIndex !== -1) {
+                    const sessionMessages = sessions[sessionIndex].messages || [];
+                    sessionMessages.forEach(msg => {
+                        if (msg.role !== 'user') {
+                            msg.isApplied = true; // 適用/破棄済みの意味
+                        }
+                    });
+                    localStorage.setItem('ai_sessions', JSON.stringify(sessions));
+                }
+            }
+
             alert('プレビューを破棄し、元のスケジュールに復元しました。');
         });
     }
@@ -2052,8 +2094,8 @@ function setupMiscEvents() {
                 ${messageHTML}
             `;
 
-            // タスク提案が検出された場合、自動的にプレビューを実行
-            if (parsedTasks && !isUser) {
+            // タスク提案が検出された場合、自動的にプレビューを実行 (ただし適用済みメッセージの場合はスキップ)
+            if (parsedTasks && !isUser && !msg.isApplied) {
                 foundProposal = true;
                 
                 // バックアップを一度だけ取得
@@ -2345,6 +2387,17 @@ JSONフォーマット:
             aiSessionsView.classList.remove('hidden');
             btnBackToSessions.classList.add('hidden');
             aiPanelTitle.textContent = 'AIセッション';
+            
+            // 戻る際にも仮プレビュー状態（バックアップ）があれば復元し、プレビューバーを非表示にする
+            if (allTasksRawBackup) {
+                allTasksRaw = JSON.parse(JSON.stringify(allTasksRawBackup));
+                allTasksRawBackup = null;
+                renderGantt();
+            }
+            if (aiPreviewBar) {
+                aiPreviewBar.classList.add('hidden');
+            }
+            
             loadAiSessions();
         });
     }
