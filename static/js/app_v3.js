@@ -45,6 +45,7 @@ const els = {
     ganttRows: document.getElementById('gantt-rows'),
     ganttTasks: document.getElementById('gantt-tasks'),
     ganttProgressLine: document.getElementById('gantt-progress-line'),
+    ganttTodayLine: document.getElementById('gantt-today-line'),
     ganttDependencyLines: document.getElementById('gantt-dependency-lines'),
     crosshairCol: document.getElementById('gantt-crosshair-col'),
     crosshairRow: document.getElementById('gantt-crosshair-row'),
@@ -251,6 +252,29 @@ async function fetchMasters() {
             updateMemberFilterText();
         }
     }
+    if (masters.status) {
+        const filterStatusList = document.getElementById('filter-status-list');
+        if (filterStatusList) {
+            // 現在のチェック状態を保存（あれば）
+            const currentSelected = window.getSelectedStatuses ? window.getSelectedStatuses() : [];
+            
+            filterStatusList.innerHTML = masters.status.map(s => `
+                <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 rounded cursor-pointer status-filter-item">
+                    <input type="checkbox" class="status-filter-cb" value="${s.status_id}" data-name="${s.status_name}" ${currentSelected.includes(s.status_id) ? 'checked' : ''}>
+                    <span>${s.status_name}</span>
+                </label>
+            `).join('');
+
+            // イベントリスナーの再設定
+            document.querySelectorAll('.status-filter-cb').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    updateStatusFilterText();
+                    renderGantt();
+                });
+            });
+            updateStatusFilterText();
+        }
+    }
 }
 
 async function fetchTasks() {
@@ -279,6 +303,27 @@ function updateMemberFilterText() {
         btnText.textContent = cb ? cb.getAttribute('data-name') : '1人選択';
     } else {
         btnText.textContent = `${selected.length}人選択`;
+    }
+}
+
+// ステータスフィルター用ヘルパー
+window.getSelectedStatuses = function() {
+    const cbs = document.querySelectorAll('.status-filter-cb:checked');
+    return Array.from(cbs).map(cb => cb.value);
+};
+
+function updateStatusFilterText() {
+    const selected = window.getSelectedStatuses();
+    const btnText = document.getElementById('filter-status-text');
+    if (!btnText) return;
+    
+    if (selected.length === 0) {
+        btnText.textContent = 'ステータス(全て)';
+    } else if (selected.length === 1) {
+        const cb = document.querySelector(`.status-filter-cb[value="${selected[0]}"]`);
+        btnText.textContent = cb ? cb.getAttribute('data-name') : '1つ選択';
+    } else {
+        btnText.textContent = `${selected.length}個選択`;
     }
 }
 
@@ -400,13 +445,11 @@ function updateFilteredTasks() {
     const filterQuery = filterTextElem && filterTextElem.value.trim() !== '' ? filterTextElem.value.trim().toLowerCase() : '';
     
     const selectedMembers = window.getSelectedMembers ? window.getSelectedMembers() : [];
-    
-    const filterHideCompletedElem = document.getElementById('filter-hide-completed');
-    const hideCompleted = filterHideCompletedElem && filterHideCompletedElem.checked;
+    const selectedStatuses = window.getSelectedStatuses ? window.getSelectedStatuses() : [];
 
     currentFilteredTasks = allTasksRaw.filter(t => {
-        if (hideCompleted && parseInt(t.progress) === 100) return false;
         if (selectedMembers.length > 0 && !selectedMembers.includes(t.member_id)) return false;
+        if (selectedStatuses.length > 0 && !selectedStatuses.includes(t.status_id)) return false;
         
         if (filterQuery !== '') {
             const charName = t.char_id ? getMasterItem('character', 'char_id', t.char_id)?.char_name || '' : '';
@@ -442,6 +485,29 @@ function renderGantt() {
     renderTasks();
     renderDependencyLines();
     renderProgressLine();
+    renderTodayLine();
+}
+
+function renderTodayLine() {
+    if (!els.ganttTodayLine) return;
+    
+    const today = moment().startOf('day');
+    
+    // 表示期間外なら描画しない
+    if (today.isBefore(ganttConfig.startDate) || today.isAfter(ganttConfig.endDate)) {
+        els.ganttTodayLine.innerHTML = '';
+        return;
+    }
+    
+    const x = dateToX(today);
+    
+    const html = `
+        <div class="absolute top-0 bottom-0 pointer-events-none flex flex-col items-center" style="left: ${x}px; width: ${ganttConfig.dayWidth}px; z-index: 25;">
+            <!-- 中心にオレンジ色の縦線を引く（dayWidthのちょうど真ん中か左端か。通常、今日という1日の「枠」の左端か真ん中。ここでは左端に線を引くなら width:0 で left:x、今回は枠の中心に引いてみる） -->
+            <div class="absolute left-1/2 top-0 bottom-0 w-[2px] bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.8)] -translate-x-1/2"></div>
+        </div>
+    `;
+    els.ganttTodayLine.innerHTML = html;
 }
 
 function buildGroupsList() {
@@ -561,10 +627,10 @@ function renderHeaderAndGrid(totalWidth) {
     let gridHtml = '';
     let currentM = ganttConfig.startDate.clone();
     
-    let yearHtml = '<div class="absolute top-0 left-0 w-full flex border-b border-gray-300 bg-white" style="height:24px;">';
-    let monthHtml = '<div class="absolute left-0 w-full flex border-b border-gray-300 bg-white" style="top:24px; height:24px;">';
-    let bottomHtml = '<div class="absolute left-0 w-full flex border-b border-gray-300 bg-white" style="top:48px; height:24px;">';
-    let heatmapHtml = '<div class="absolute left-0 w-full border-b border-gray-400 bg-white" style="top:72px; height:48px;">';
+    let heatmapHtml = '<div class="absolute left-0 w-full border-b border-gray-300 bg-white" style="top:0px; height:48px;">';
+    let yearHtml = '<div class="absolute left-0 w-full flex border-b border-gray-300 bg-white" style="top:48px; height:24px;">';
+    let monthHtml = '<div class="absolute left-0 w-full flex border-b border-gray-300 bg-white" style="top:72px; height:24px;">';
+    let bottomHtml = '<div class="absolute left-0 w-full flex border-b border-gray-400 bg-white" style="top:96px; height:24px;">';
     
     let currentYear = currentM.year();
     let yearStartDays = 0;
@@ -3074,6 +3140,11 @@ JSONフォーマット:
     const filterMemberDropdown = document.getElementById('filter-member-dropdown');
     const filterMemberSearch = document.getElementById('filter-member-search');
 
+    // カスタムステータスフィルターのUI制御
+    const filterStatusBtn = document.getElementById('filter-status-btn');
+    const filterStatusDropdown = document.getElementById('filter-status-dropdown');
+    const filterStatusSearch = document.getElementById('filter-status-search');
+
     if (filterMemberBtn) {
         filterMemberBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -3081,6 +3152,7 @@ JSONフォーマット:
             if (!filterMemberDropdown.classList.contains('hidden')) {
                 filterMemberSearch.focus();
             }
+            if (filterStatusDropdown) filterStatusDropdown.classList.add('hidden');
         });
     }
 
@@ -3099,6 +3171,32 @@ JSONフォーマット:
         });
     }
 
+    if (filterStatusBtn) {
+        filterStatusBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            filterStatusDropdown.classList.toggle('hidden');
+            if (!filterStatusDropdown.classList.contains('hidden')) {
+                filterStatusSearch.focus();
+            }
+            if (filterMemberDropdown) filterMemberDropdown.classList.add('hidden');
+        });
+    }
+
+    if (filterStatusSearch) {
+        filterStatusSearch.addEventListener('input', (e) => {
+            const term = e.target.value.trim().toLowerCase();
+            document.querySelectorAll('.status-filter-item').forEach(item => {
+                const cb = item.querySelector('.status-filter-cb');
+                const name = cb.getAttribute('data-name').toLowerCase();
+                if (name.includes(term)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+    }
+
     // ドロップダウンの外をクリックしたら閉じる
     document.addEventListener('click', (e) => {
         if (filterMemberDropdown && !filterMemberDropdown.classList.contains('hidden')) {
@@ -3106,10 +3204,11 @@ JSONフォーマット:
                 filterMemberDropdown.classList.add('hidden');
             }
         }
-    });
-
-    document.getElementById('filter-hide-completed').addEventListener('change', () => {
-        renderGantt();
+        if (filterStatusDropdown && !filterStatusDropdown.classList.contains('hidden')) {
+            if (!e.target.closest('#filter-status-container')) {
+                filterStatusDropdown.classList.add('hidden');
+            }
+        }
     });
 
     if (els.toggleProgressLine) {

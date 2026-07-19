@@ -22,58 +22,18 @@
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden text-sm">
     <!-- Header -->
-    <header class="bg-blue-800 text-white p-4 flex justify-between items-center shadow-md z-30">
-        <div class="flex items-center space-x-4">
-            <h1 class="text-xl font-bold">次世代アートWBSツール (完全自作版)</h1>
-            <div class="flex items-center space-x-2 ml-4">
-                <label for="filter-section" class="font-bold">稼働Line表示:</label>
-                <select id="filter-section" class="text-black px-2 py-1 rounded border">
-                    <option value="">全セクション表示</option>
-                </select>
-            </div>
-            <!-- 検索フィルターUI -->
-            <div class="flex items-center space-x-2 ml-4 bg-blue-700 p-2 rounded">
-                <div class="flex items-center">
-                    <span class="mr-1">🔍</span>
-                    <input type="text" id="filter-text" class="text-black px-2 py-1 rounded border w-40" placeholder="タスク・キャラ名">
-                </div>
-                <div class="flex items-center relative" id="filter-member-container">
-                    <span class="mr-1">👤</span>
-                    <button id="filter-member-btn" class="bg-white text-black px-2 py-1 rounded border w-40 text-left flex justify-between items-center whitespace-nowrap overflow-hidden">
-                        <span id="filter-member-text" class="truncate">担当者(全て)</span>
-                        <span class="text-xs ml-1">▼</span>
-                    </button>
-                    <!-- マルチセレクト用ドロップダウン -->
-                    <div id="filter-member-dropdown" class="hidden absolute top-full mt-1 left-4 w-48 bg-white text-black border rounded shadow-lg z-50 flex flex-col max-h-64">
-                        <div class="p-1 border-b">
-                            <input type="text" id="filter-member-search" class="w-full px-2 py-1 border rounded text-sm" placeholder="名前を検索...">
-                        </div>
-                        <div id="filter-member-list" class="flex-1 overflow-y-auto p-1 space-y-1 text-sm">
-                            <!-- JSで生成されるチェックボックス -->
-                        </div>
-                    </div>
-                </div>
-                <div class="flex items-center ml-2">
-                    <input type="checkbox" id="filter-hide-completed" class="mr-1 w-4 h-4 rounded cursor-pointer">
-                    <label for="filter-hide-completed" class="text-sm font-bold cursor-pointer flex items-center">完了非表示</label>
-                </div>
-                <div class="flex items-center ml-4">
-                    <input type="checkbox" id="toggle-progress-line" class="mr-1 w-4 h-4 rounded cursor-pointer">
-                    <label for="toggle-progress-line" class="text-sm font-bold cursor-pointer flex items-center text-white">⚡イナズマ線</label>
-                </div>
-            </div>
+    <header class="bg-blue-800 text-white p-4 flex justify-between items-center shadow-md z-40 relative">
+        <div class="flex items-center space-x-6">
+            <h1 class="text-xl font-bold">南雲式WBSツール</h1>
+            <button id="btn-restart" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded font-bold shadow transition text-sm">🔄 サーバー再起動</button>
         </div>
         <div class="flex space-x-4 items-center">
-            <span id="unsaved-badge" class="bg-red-500 text-white px-3 py-1 rounded hidden font-bold mt-1">未保存の変更あり</span>
-            <button id="btn-undo" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded transition disabled:opacity-50" disabled>取り消し</button>
-            <button id="btn-redo" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded transition disabled:opacity-50" disabled>やり直し</button>
             <a href="/master_editor" target="_blank" class="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded transition" id="master-editor-link">マスタ管理</a>
-            <button id="btn-save" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">保存</button>
             
             <!-- エクスポートボタン（ドロップダウン） -->
             <div class="relative inline-block text-left" id="export-container">
                 <button id="btn-export-toggle" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold shadow transition flex items-center space-x-1">
-                    <span>📤 出力 (エクスポート)</span>
+                    <span>📤 出力</span>
                     <span class="text-xs">▼</span>
                 </button>
                 <div id="export-dropdown" class="hidden absolute right-0 mt-2 w-40 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-50 text-black">
@@ -83,16 +43,95 @@
                 </div>
             </div>
 
-            <button id="btn-restart" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded font-bold shadow transition">サーバー再起動</button>
             <button id="btn-ai-chat" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded font-bold shadow transition flex items-center">
                 <span>🤖 AIアシスタント</span>
             </button>
         </div>
     </header>
 
-    <!-- Project Tabs -->
-    <div class="bg-gray-200 border-b flex items-end px-2 pt-2 space-x-1 overflow-x-auto select-none" id="project-tabs-container">
-        <!-- Tabs injected by JS -->
+    <!-- Tab & Control Bar (Tabs and Filters integrated) -->
+    <div class="bg-gray-200 border-b flex items-center justify-between px-3 py-1.5 select-none z-30" id="tabs-control-bar">
+        <!-- 左側：タブ + 検索フィルター群（仕切りあり） -->
+        <div class="flex items-center space-x-3">
+            <!-- タブ -->
+            <div class="flex items-end space-x-1" id="project-tabs-container">
+                <!-- Tabs injected by JS -->
+            </div>
+            
+            <div class="h-6 w-px bg-gray-400 mx-2"></div> <!-- 区切り線 -->
+            
+            <!-- 検索 & フィルター -->
+            <div class="flex items-center space-x-3 text-xs">
+                <!-- 検索 -->
+                <div class="flex items-center space-x-1 bg-white px-2 py-1 rounded border shadow-sm">
+                    <span class="text-gray-400 text-xs">🔍</span>
+                    <input type="text" id="filter-text" class="text-black border-none focus:outline-none w-36 text-xs" placeholder="タスク・キャラ名">
+                </div>
+                
+                <!-- 担当者 -->
+                <div class="flex items-center relative" id="filter-member-container">
+                    <button id="filter-member-btn" class="bg-white text-black px-2 py-1 rounded border shadow-sm w-36 text-left flex justify-between items-center whitespace-nowrap overflow-hidden text-xs hover:bg-gray-50">
+                        <span id="filter-member-text" class="truncate">👤 担当者(全て)</span>
+                        <span class="text-[10px] ml-1 text-gray-400">▼</span>
+                    </button>
+                    <!-- ドロップダウン -->
+                    <div id="filter-member-dropdown" class="hidden absolute top-full mt-1 left-0 w-48 bg-white text-black border rounded shadow-lg z-50 flex flex-col max-h-64">
+                        <div class="p-1 border-b bg-gray-50">
+                            <input type="text" id="filter-member-search" class="w-full px-2 py-1 border rounded text-[11px] focus:outline-none" placeholder="名前を検索...">
+                        </div>
+                        <div id="filter-member-list" class="flex-1 overflow-y-auto p-1 space-y-1 text-[11px]">
+                            <!-- JSで生成されるチェックボックス -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ステータス -->
+                <div class="flex items-center relative" id="filter-status-container">
+                    <button id="filter-status-btn" class="bg-white text-black px-2 py-1 rounded border shadow-sm w-36 text-left flex justify-between items-center whitespace-nowrap overflow-hidden text-xs hover:bg-gray-50">
+                        <span id="filter-status-text" class="truncate">⚙️ ステータス(全て)</span>
+                        <span class="text-[10px] ml-1 text-gray-400">▼</span>
+                    </button>
+                    <!-- ドロップダウン -->
+                    <div id="filter-status-dropdown" class="hidden absolute top-full mt-1 left-0 w-48 bg-white text-black border rounded shadow-lg z-50 flex flex-col max-h-64">
+                        <div class="p-1 border-b bg-gray-50">
+                            <input type="text" id="filter-status-search" class="w-full px-2 py-1 border rounded text-[11px] focus:outline-none" placeholder="ステータスを検索...">
+                        </div>
+                        <div id="filter-status-list" class="flex-1 overflow-y-auto p-1 space-y-1 text-[11px]">
+                            <!-- JSで生成されるチェックボックス -->
+                        </div>
+                    </div>
+                </div>
+            <div class="h-6 w-px bg-gray-400 mx-2"></div> <!-- 仕切り -->
+
+            <!-- イナズマ線 -->
+            <div class="flex items-center bg-white px-2 py-1 rounded border shadow-sm text-xs">
+                <input type="checkbox" id="toggle-progress-line" class="mr-1 w-3.5 h-3.5 rounded cursor-pointer">
+                <label for="toggle-progress-line" class="text-xs text-gray-700 cursor-pointer flex items-center font-semibold">⚡イナズマ線</label>
+            </div>
+
+            <div class="h-6 w-px bg-gray-400 mx-2"></div> <!-- 仕切り -->
+
+            <!-- 取り消し・やり直し（矢印アイコン化） -->
+            <div class="flex items-center space-x-1 text-xs">
+                <button id="btn-undo" class="bg-gray-500 hover:bg-gray-600 disabled:opacity-30 disabled:hover:bg-gray-500 text-white w-7 h-7 rounded flex items-center justify-center transition shadow-sm" disabled title="取り消し (Ctrl+Z)">
+                    <span class="text-sm font-bold">↶</span>
+                </button>
+                <button id="btn-redo" class="bg-gray-500 hover:bg-gray-600 disabled:opacity-30 disabled:hover:bg-gray-500 text-white w-7 h-7 rounded flex items-center justify-center transition shadow-sm" disabled title="やり直し (Ctrl+Y)">
+                    <span class="text-sm font-bold">↷</span>
+                </button>
+            </div>
+            </div>
+        </div>
+
+        
+        <!-- 右側：保存のみ（仕切りなし） -->
+        <div class="flex items-center space-x-2 text-xs">
+            <!-- 保存ボタン & 未保存バッジ -->
+            <span id="unsaved-badge" class="text-red-600 font-bold text-xs hidden animate-pulse">⚠️ 未保存の変更あり</span>
+            <button id="btn-save" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded font-bold shadow-sm transition text-xs flex items-center">
+                <span>💾 保存</span>
+            </button>
+        </div>
     </div>
 
     <!-- AI Proposal Preview Bar (スプシの一時的なフィルタ風) -->
@@ -116,6 +155,15 @@
             <div id="gantt-right" class="flex-1 flex flex-col relative bg-white overflow-hidden">
                 <!-- タイムラインヘッダー（日付スケール＋稼働Line数） -->
                 <div id="gantt-header" class="h-[120px] border-b border-gray-300 bg-gray-50 flex-shrink-0 overflow-hidden relative select-none">
+                    <!-- 稼働Line表示プルダウン用の固定コンテナ -->
+                    <div id="gantt-header-fixed-left" class="absolute left-0 top-0 h-[48px] bg-white border-b border-r border-gray-300 z-20 flex items-center px-3 shadow-sm select-text" style="width: 280px;">
+                        <div class="flex items-center space-x-2 w-full">
+                            <label for="filter-section" class="text-xs font-bold text-gray-700 whitespace-nowrap">📊 稼働人員:</label>
+                            <select id="filter-section" class="text-black px-2 py-1 rounded border text-xs bg-white focus:outline-none w-full">
+                                <option value="">全セクション表示</option>
+                            </select>
+                        </div>
+                    </div>
                     <div id="gantt-header-content" class="absolute top-0 left-0 h-full min-w-full transition-transform duration-75"></div>
                 </div>
                 <!-- タイムラインボディ（スクロール領域） -->
@@ -131,6 +179,8 @@
                         <svg id="gantt-dependency-lines" class="absolute top-0 left-0 w-full h-full pointer-events-none" style="z-index: 15; overflow: visible;"></svg>
                         <!-- イナズマ線の配置コンテナ -->
                         <div id="gantt-progress-line" class="absolute top-0 left-0 w-full h-full z-20 pointer-events-none"></div>
+                        <!-- 今日の日付線の配置コンテナ -->
+                        <div id="gantt-today-line" class="absolute top-0 left-0 w-full h-full pointer-events-none" style="z-index: 25;"></div>
                         <!-- マウス追従ハイライト -->
                         <div id="gantt-crosshair-col" class="hidden absolute top-0 bottom-0 bg-blue-500/10 pointer-events-none z-10 border-l border-r border-blue-500/20"></div>
                         <div id="gantt-crosshair-row" class="hidden absolute left-0 right-0 bg-blue-500/10 pointer-events-none z-10 border-t border-b border-blue-500/20"></div>
