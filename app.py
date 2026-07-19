@@ -91,6 +91,14 @@ def restart_server():
     os._exit(0)
     return jsonify({"status": "ok"})
 
+@app.route('/api/shutdown', methods=['POST'])
+def shutdown_server_api():
+    print("\n========================================================")
+    print("Browser closed. Shutting down Flask server and CMD...")
+    print("========================================================\n")
+    os._exit(0)
+    return jsonify({"status": "ok"})
+
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
     if not os.path.exists(PROJECTS_DIR):
@@ -203,6 +211,151 @@ def save_masters():
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# ==========================================
+# AI Assistant API Proxy
+# ==========================================
+import urllib.request
+import json
+import urllib.error
+
+@app.route('/api/llm/models', methods=['POST'])
+def get_llm_models():
+    data = request.json
+    provider = data.get('provider')
+    api_key = data.get('apiKey')
+    if not api_key:
+        return jsonify({"status": "error", "message": "APIキーが設定されていません。"}), 400
+
+    models = []
+    try:
+        if provider == 'openai':
+            req = urllib.request.Request("https://api.openai.com/v1/models")
+            req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                models = [m['id'] for m in res_data.get('data', []) if m['id'].startswith('gpt-')]
+        elif provider == 'gemini':
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                models = [m['name'].replace('models/', '') for m in res_data.get('models', []) if 'generateContent' in m.get('supportedGenerationMethods', [])]
+        else:
+            return jsonify({"status": "error", "message": "このプロバイダは動的取得に対応していません。"}), 400
+            
+    except urllib.error.HTTPError as e:
+        error_msg = e.read().decode('utf-8')
+        return jsonify({"status": "error", "message": f"APIエラー ({e.code}): {error_msg}"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    models.sort(reverse=True) # 新しいモデルが上に来るように簡易ソート
+    return jsonify({"status": "success", "models": models})
+
+@app.route('/api/llm/chat', methods=['POST'])
+def ai_chat_proxy():
+    data = request.json
+    provider = data.get('provider')
+    api_key = data.get('apiKey')
+    model = data.get('model')
+    messages = data.get('messages', [])
+    system_prompt = data.get('systemPrompt', '')
+    temperature = data.get('temperature', 0.7)
+
+    if not api_key or not model:
+        return jsonify({"status": "error", "message": "APIキーとモデルが正しく設定されていません。"}), 400
+
+    try:
+        reply_text = ""
+        total_tokens = 0
+
+        if provider == 'openai':
+            # OpenAI API Format
+            api_url = "https://api.openai.com/v1/chat/completions"
+            payload_messages = []
+            if system_prompt:
+                payload_messages.append({"role": "system", "content": system_prompt})
+            payload_messages.extend(messages)
+            
+            payload = {
+                "model": model,
+                "messages": payload_messages,
+                "temperature": temperature
+            }
+            req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                reply_text = res_data['choices'][0]['message']['content']
+                total_tokens = res_data.get('usage', {}).get('total_tokens', 0)
+
+        elif provider == 'claude':
+            # Anthropic API Format (Messages API)
+            api_url = "https://api.anthropic.com/v1/messages"
+            payload = {
+                "model": model,
+                "max_tokens": 4096,
+                "temperature": temperature,
+                "system": system_prompt,
+                "messages": messages
+            }
+            req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
+            req.add_header("x-api-key", api_key)
+            req.add_header("anthropic-version", "2023-06-01")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                reply_text = res_data['content'][0]['text']
+                total_tokens = res_data.get('usage', {}).get('input_tokens', 0) + res_data.get('usage', {}).get('output_tokens', 0)
+
+        elif provider == 'gemini':
+            # Gemini API Format
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            gemini_messages = []
+            for msg in messages:
+                gemini_messages.append({
+                    "role": "user" if msg['role'] == "user" else "model",
+                    "parts": [{"text": msg['content']}]
+                })
+                
+            payload = {
+                "contents": gemini_messages,
+                "generationConfig": {
+                    "temperature": temperature
+                }
+            }
+            if system_prompt:
+                payload["systemInstruction"] = {
+                    "parts": [{"text": system_prompt}]
+                }
+
+            req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                reply_text = res_data['candidates'][0]['content']['parts'][0]['text']
+                total_tokens = res_data.get('usageMetadata', {}).get('totalTokenCount', 0)
+
+        else:
+            return jsonify({"status": "error", "message": "不明なプロバイダです。"}), 400
+
+        return jsonify({
+            "status": "success",
+            "reply": reply_text,
+            "tokens": total_tokens
+        })
+        
+    except urllib.error.HTTPError as e:
+        error_msg = e.read().decode('utf-8')
+        return jsonify({"status": "error", "message": f"APIエラー ({e.code}): {error_msg}"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == '__main__':
     import threading

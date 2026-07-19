@@ -8,6 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Moment.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+    <!-- Marked.js (Markdown Parser) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Custom CSS -->
     <script>
         const link = document.createElement('link');
@@ -62,12 +64,27 @@
             <a href="/master_editor" target="_blank" class="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded transition" id="master-editor-link">マスタ管理</a>
             <button id="btn-save" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">保存</button>
             <button id="btn-restart" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded font-bold shadow transition">サーバー再起動</button>
+            <button id="btn-ai-chat" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded font-bold shadow transition flex items-center">
+                <span>🤖 AIアシスタント</span>
+            </button>
         </div>
     </header>
 
     <!-- Project Tabs -->
     <div class="bg-gray-200 border-b flex items-end px-2 pt-2 space-x-1 overflow-x-auto select-none" id="project-tabs-container">
         <!-- Tabs injected by JS -->
+    </div>
+
+    <!-- AI Proposal Preview Bar (スプシの一時的なフィルタ風) -->
+    <div id="ai-preview-bar" class="hidden bg-green-100 border-b border-green-300 text-green-800 px-4 py-2 flex justify-between items-center z-20 font-semibold shadow-sm">
+        <div class="flex items-center space-x-2 text-sm">
+            <span class="text-base">💡</span>
+            <span>AIによるスケジュール調整案を一時プレビュー表示しています（仮反映中）。カレンダー上の変更を確認してください。</span>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button id="btn-ai-preview-save" class="bg-green-700 hover:bg-green-800 text-white text-xs font-bold px-3.5 py-1.5 rounded transition shadow-sm">提案を保存</button>
+            <button id="btn-ai-preview-discard" class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3.5 py-1.5 rounded transition shadow-sm">提案を破棄</button>
+        </div>
     </div>
 
     <!-- Main Content -->
@@ -163,6 +180,132 @@
             </div>
         </div>
         
+        <!-- AI Chat Panel -->
+        <div id="ai-chat-panel" class="w-[400px] bg-gray-50 border-l shadow-xl flex flex-col transform translate-x-full transition-transform duration-300 absolute right-0 top-0 h-full z-50">
+            <div class="p-3 bg-blue-800 text-white border-b flex justify-between items-center relative">
+                <div class="flex items-center space-x-2">
+                    <button id="btn-back-to-sessions" class="hidden mr-1 text-gray-300 hover:text-white font-bold text-lg" title="一覧に戻る">⇐</button>
+                    <span class="text-xl">🤖</span>
+                    <h2 class="font-bold" id="ai-panel-title">AIセッション</h2>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button id="btn-ai-settings" class="text-gray-300 hover:text-white" title="設定">⚙️</button>
+                    <button id="btn-close-ai-chat" class="text-gray-300 hover:text-white text-xl">&times;</button>
+                </div>
+            </div>
+            
+            <!-- View 1: セッション一覧画面 -->
+            <div id="ai-sessions-view" class="flex-1 flex flex-col overflow-hidden">
+                <div id="ai-session-list" class="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-100">
+                    <!-- JSで履歴一覧を描画 -->
+                    <div class="text-gray-500 text-center text-xs mt-4" id="ai-no-sessions-msg">
+                        セッション履歴がありません。<br>下部から期間を指定して新規開始してください。
+                    </div>
+                </div>
+                
+                <!-- 新規セッション作成エリア -->
+                <div class="p-4 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] flex flex-col space-y-3">
+                    <h3 class="font-bold text-sm text-gray-700 flex items-center">
+                        <span class="mr-1">✨</span> 新規セッション開始
+                    </h3>
+                    <div class="text-xs text-gray-500">対象期間（この期間のタスクをAIに共有します）</div>
+                    <div class="flex items-center space-x-2 text-sm">
+                        <input type="date" id="ai-new-session-start" class="border rounded px-2 py-1.5 flex-1 bg-gray-50 focus:bg-white">
+                        <span class="text-gray-500 font-bold">〜</span>
+                        <input type="date" id="ai-new-session-end" class="border rounded px-2 py-1.5 flex-1 bg-gray-50 focus:bg-white">
+                    </div>
+                    <button id="btn-start-new-session" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition disabled:opacity-50 disabled:cursor-not-allowed shadow" disabled>
+                        この期間でセッションを開始
+                    </button>
+                </div>
+            </div>
+
+            <!-- View 2: 個別チャット画面 (初期は非表示) -->
+            <div id="ai-chat-view" class="hidden flex-1 flex flex-col overflow-hidden bg-white">
+                <div id="ai-chat-messages" class="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col">
+                    <!-- メッセージがここに入る -->
+                </div>
+
+                <!-- ファイル添付ドロップゾーンを兼ねる入力セクション -->
+                <div class="p-3 bg-gray-100 border-t relative flex flex-col" id="ai-input-section">
+                    <!-- モード切替タブ -->
+                    <div class="flex border-b border-gray-300 mb-2 bg-gray-200 rounded p-0.5 text-xs font-bold">
+                        <button id="btn-mode-assistant" class="flex-1 py-1 px-2 rounded text-center bg-white text-blue-800 shadow-sm transition flex justify-center items-center space-x-1">
+                            <span>🧑‍💼</span> <span>アシスタント (相談)</span>
+                        </button>
+                        <button id="btn-mode-operator" class="flex-1 py-1 px-2 rounded text-center text-gray-600 hover:text-gray-900 transition flex justify-center items-center space-x-1">
+                            <span>🤖</span> <span>オペレーター (マスタ操作)</span>
+                        </button>
+                    </div>
+
+                    <!-- 添付ファイル情報表示 -->
+                    <div id="ai-attachment-badge" class="hidden flex items-center justify-between bg-yellow-50 border border-yellow-200 text-yellow-800 px-2 py-1 rounded text-xs mb-2 shadow-sm">
+                        <span class="truncate" id="ai-attachment-name">📎 ファイル名.csv</span>
+                        <button id="btn-remove-attachment" class="text-gray-400 hover:text-red-500 font-bold ml-2">&times;</button>
+                    </div>
+
+                    <div id="ai-chat-preview-container" class="hidden flex items-center space-x-2 mb-2 bg-white p-2 border rounded shadow-sm">
+                        <!-- 画像プレビュー等が入る想定 -->
+                    </div>
+
+                    <div class="flex space-x-2 items-end">
+                        <input type="file" id="ai-file-input" class="hidden" accept=".csv,text/plain,image/*">
+                        <button id="btn-ai-attach" class="text-gray-500 hover:text-blue-500 p-2 bg-white border rounded shadow-sm" title="ファイルを添付 (ドラッグ&ドロップも可能)">📎</button>
+                        <textarea id="ai-chat-input" class="flex-1 border rounded p-2 text-sm resize-none shadow-sm focus:ring-1 focus:ring-blue-500" rows="1" style="min-height: 40px; max-height: 120px;" placeholder="メッセージを入力... (Ctrl+Enterで送信)"></textarea>
+                        <button id="btn-ai-send" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded font-bold shadow-sm h-[40px]">送信</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Settings Modal -->
+        <div id="ai-settings-dialog" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-[100]">
+            <div class="bg-white rounded-lg shadow-xl w-[500px] flex flex-col max-h-[90vh]">
+                <div class="p-4 border-b flex justify-between items-center bg-gray-100 rounded-t-lg">
+                    <h2 class="text-lg font-bold">🤖 AIアシスタント設定</h2>
+                    <button class="text-gray-500 hover:text-black text-xl" onclick="document.getElementById('ai-settings-dialog').classList.add('hidden')">&times;</button>
+                </div>
+                <div class="p-6 overflow-y-auto space-y-4 flex-1">
+                    <div>
+                        <label class="block font-bold mb-1">プロバイダ</label>
+                        <select id="ai-provider" class="w-full border rounded p-2">
+                            <option value="gemini">Google (Gemini)</option>
+                            <option value="openai">OpenAI (ChatGPT)</option>
+                            <option value="claude">Anthropic (Claude)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">APIキー</label>
+                        <input type="password" id="ai-api-key" class="w-full border rounded p-2" placeholder="sk-...">
+                        <p class="text-xs text-gray-500 mt-1">※ブラウザのLocalStorageに保存されます。</p>
+                    </div>
+                    <div class="flex space-x-2 items-end">
+                        <div class="flex-1">
+                            <label class="block font-bold mb-1">モデル</label>
+                            <select id="ai-model-select" class="w-full border rounded p-2">
+                                <option value="">--- 取得ボタンを押してください ---</option>
+                            </select>
+                            <input type="text" id="ai-model-manual" class="w-full border rounded p-2 hidden mt-1" placeholder="手動入力 (例: claude-3-5-sonnet-20240620)">
+                        </div>
+                        <button id="btn-fetch-models" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded border border-gray-400 font-bold text-sm">更新</button>
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">Temperature (温度)</label>
+                        <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="0.7" class="w-full">
+                        <div class="text-center text-sm text-gray-600"><span id="ai-temp-val">0.7</span></div>
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">System Prompt</label>
+                        <textarea id="ai-system-prompt" class="w-full border rounded p-2 text-sm" rows="3" placeholder="AIの役割などを入力...">あなたは優秀なプロジェクト管理アシスタントです。</textarea>
+                    </div>
+                </div>
+                <div class="p-4 border-t flex justify-end space-x-2 bg-gray-50 rounded-b-lg">
+                    <button class="px-4 py-2 bg-gray-300 hover:bg-gray-400 rounded" onclick="document.getElementById('ai-settings-dialog').classList.add('hidden')">キャンセル</button>
+                    <button id="btn-save-ai-settings" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold">保存</button>
+                </div>
+            </div>
+        </div>
+
         <!-- New Project Dialog -->
         <div id="new-project-dialog" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-[100]">
             <div class="bg-white rounded-lg shadow-xl p-6 w-96">
@@ -225,6 +368,11 @@
         setInterval(() => {
             fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
         }, 3000);
+
+        // ウィンドウ・タブが閉じられた瞬間に、確実にサーバープロセスを落とす
+        window.addEventListener('pagehide', () => {
+            navigator.sendBeacon('/api/shutdown');
+        });
         
         const script = document.createElement('script');
         // 完全自作版のJS（app_v3.js）を読み込む

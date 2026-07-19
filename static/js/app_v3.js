@@ -1780,6 +1780,718 @@ function setupMiscEvents() {
         });
     }
 
+    // --- AI Chat Logic ---
+    const btnAiChat = document.getElementById('btn-ai-chat');
+    const aiChatPanel = document.getElementById('ai-chat-panel');
+    const btnCloseAiChat = document.getElementById('btn-close-ai-chat');
+    const btnAiSettings = document.getElementById('btn-ai-settings');
+    const aiSettingsDialog = document.getElementById('ai-settings-dialog');
+    const btnSaveAiSettings = document.getElementById('btn-save-ai-settings');
+    const aiProvider = document.getElementById('ai-provider');
+    const aiApiKey = document.getElementById('ai-api-key');
+    const aiModelSelect = document.getElementById('ai-model-select');
+    const aiModelManual = document.getElementById('ai-model-manual');
+    const aiTemperature = document.getElementById('ai-temperature');
+    const aiTempVal = document.getElementById('ai-temp-val');
+    const aiSystemPrompt = document.getElementById('ai-system-prompt');
+
+    // --- AI Session Management ---
+    let currentSessionId = null;
+    let currentAiMode = 'assistant'; // 'assistant' または 'operator'
+    let attachedFileContent = null;
+    let attachedFileName = null;
+    let allTasksRawBackup = null; // スケジュール提案の一時プレビュー用バックアップ
+
+    const aiSessionsView = document.getElementById('ai-sessions-view');
+    const aiChatView = document.getElementById('ai-chat-view');
+    const btnBackToSessions = document.getElementById('btn-back-to-sessions');
+    const aiSessionList = document.getElementById('ai-session-list');
+    const aiNoSessionsMsg = document.getElementById('ai-no-sessions-msg');
+
+    // モード切替のUIイベント登録
+    const btnModeAssistant = document.getElementById('btn-mode-assistant');
+    const btnModeOperator = document.getElementById('btn-mode-operator');
+
+    function setAiMode(mode) {
+        currentAiMode = mode;
+        if (mode === 'assistant') {
+            btnModeAssistant.className = "flex-1 py-1 px-2 rounded text-center bg-white text-blue-800 shadow-sm transition flex justify-center items-center space-x-1";
+            btnModeOperator.className = "flex-1 py-1 px-2 rounded text-center text-gray-600 hover:text-gray-900 transition flex justify-center items-center space-x-1";
+            document.getElementById('ai-chat-input').placeholder = "メッセージを入力... (Ctrl+Enterで送信)";
+        } else {
+            btnModeOperator.className = "flex-1 py-1 px-2 rounded text-center bg-white text-blue-800 shadow-sm transition flex justify-center items-center space-x-1";
+            btnModeAssistant.className = "flex-1 py-1 px-2 rounded text-center text-gray-600 hover:text-gray-900 transition flex justify-center items-center space-x-1";
+            document.getElementById('ai-chat-input').placeholder = "マスタ操作の指示を入力してください... (例: キャラマスタに衣装を追加して)";
+        }
+    }
+
+    if (btnModeAssistant && btnModeOperator) {
+        btnModeAssistant.addEventListener('click', () => setAiMode('assistant'));
+        btnModeOperator.addEventListener('click', () => setAiMode('operator'));
+    }
+
+    // ファイル添付（ドラッグ＆ドロップ、クリック）の登録
+    const btnAiAttach = document.getElementById('btn-ai-attach');
+    const aiFileInput = document.getElementById('ai-file-input');
+    const aiAttachmentBadge = document.getElementById('ai-attachment-badge');
+    const aiAttachmentName = document.getElementById('ai-attachment-name');
+    const btnRemoveAttachment = document.getElementById('btn-remove-attachment');
+    const aiInputSection = document.getElementById('ai-input-section');
+
+    if (btnAiAttach && aiFileInput) {
+        btnAiAttach.addEventListener('click', () => {
+            aiFileInput.click();
+        });
+        aiFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleAttachedFile(file);
+        });
+    }
+
+    // ドラッグ＆ドロップの処理
+    if (aiInputSection) {
+        aiInputSection.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            aiInputSection.classList.add('bg-blue-50');
+        });
+        aiInputSection.addEventListener('dragleave', () => {
+            aiInputSection.classList.remove('bg-blue-50');
+        });
+        aiInputSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            aiInputSection.classList.remove('bg-blue-50');
+            const file = e.dataTransfer.files[0];
+            if (file) handleAttachedFile(file);
+        });
+    }
+
+    function handleAttachedFile(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            attachedFileContent = e.target.result;
+            attachedFileName = file.name;
+            aiAttachmentName.textContent = `📎 ${file.name}`;
+            aiAttachmentBadge.classList.remove('hidden');
+        };
+        // テキスト、CSVなど、とりあえずテキストとして読み込む
+        reader.readAsText(file);
+    }
+
+    if (btnRemoveAttachment) {
+        btnRemoveAttachment.addEventListener('click', () => {
+            attachedFileContent = null;
+            attachedFileName = null;
+            aiAttachmentBadge.classList.add('hidden');
+            aiFileInput.value = '';
+        });
+    }
+    
+    const newSessionStart = document.getElementById('ai-new-session-start');
+    const newSessionEnd = document.getElementById('ai-new-session-end');
+    const btnStartNewSession = document.getElementById('btn-start-new-session');
+    const aiPanelTitle = document.getElementById('ai-panel-title');
+
+    function loadAiSessions() {
+        const sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+        aiSessionList.innerHTML = '';
+        if (sessions.length === 0) {
+            aiSessionList.appendChild(aiNoSessionsMsg);
+            aiNoSessionsMsg.classList.remove('hidden');
+        } else {
+            aiNoSessionsMsg.classList.add('hidden');
+            // 降順（新しい順）で表示
+            sessions.reverse().forEach(session => {
+                const div = document.createElement('div');
+                div.className = 'bg-white border rounded p-3 shadow-sm hover:shadow-md transition cursor-pointer flex flex-col relative group';
+                div.innerHTML = `
+                    <div class="font-bold text-gray-800 text-sm mb-1 truncate pr-6">${session.title || '無題のセッション'}</div>
+                    <div class="text-xs text-gray-500 mb-1">期間: ${session.startDate} 〜 ${session.endDate}</div>
+                    <div class="text-xs text-blue-600 font-bold">消費トークン: ${session.totalTokens || 0}</div>
+                    <button class="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition btn-delete-session" data-id="${session.id}" title="削除">🗑️</button>
+                `;
+                // セッションクリックで開く
+                div.addEventListener('click', (e) => {
+                    if (e.target.closest('.btn-delete-session')) return; // ゴミ箱クリック時は無視
+                    openAiSession(session.id);
+                });
+                // 削除ボタン
+                div.querySelector('.btn-delete-session').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (confirm('このセッション履歴を削除しますか？')) {
+                        deleteAiSession(session.id);
+                    }
+                });
+                aiSessionList.appendChild(div);
+            });
+        }
+    }
+
+    function deleteAiSession(id) {
+        let sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+        sessions = sessions.filter(s => s.id !== id);
+        localStorage.setItem('ai_sessions', JSON.stringify(sessions));
+        loadAiSessions();
+    }
+
+    function openAiSession(id) {
+        currentSessionId = id;
+        aiSessionsView.classList.add('hidden');
+        aiChatView.classList.remove('hidden');
+        btnBackToSessions.classList.remove('hidden');
+        
+        const sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+        const session = sessions.find(s => s.id === id);
+        if (session) {
+            aiPanelTitle.textContent = session.title || 'AIセッション';
+            renderAiChatMessages(session.messages || []);
+        } else {
+            renderAiChatMessages([]);
+        }
+    }
+
+    // --- AI Preview Bar Logic (スプシ風) ---
+    const aiPreviewBar = document.getElementById('ai-preview-bar');
+    const btnAiPreviewSave = document.getElementById('btn-ai-preview-save');
+    const btnAiPreviewDiscard = document.getElementById('btn-ai-preview-discard');
+
+    if (btnAiPreviewSave) {
+        btnAiPreviewSave.addEventListener('click', async () => {
+            try {
+                btnAiPreviewSave.disabled = true;
+                btnAiPreviewSave.textContent = '保存中...';
+                
+                // ツール本来の「保存」ボタンを取得
+                const btnSave = document.getElementById('btn-save');
+                if (btnSave) {
+                    // プログラム上からクリックイベントを発火させ、
+                    // デッドラインやキャラクターマスターの順序整列を含めたすべての整合性を保って完全に保存します。
+                    btnSave.click();
+                    
+                    // バックアップをクリアし、プレビューバーを非表示にする
+                    allTasksRawBackup = null;
+                    if (aiPreviewBar) {
+                        aiPreviewBar.classList.add('hidden');
+                    }
+                } else {
+                    alert('システムの保存ボタンが見つかりませんでした。');
+                }
+            } catch (e) {
+                alert('保存時に通信エラーが発生しました: ' + e);
+            } finally {
+                btnAiPreviewSave.disabled = false;
+                btnAiPreviewSave.textContent = '提案を保存';
+            }
+        });
+    }
+
+    if (btnAiPreviewDiscard) {
+        btnAiPreviewDiscard.addEventListener('click', () => {
+            if (allTasksRawBackup) {
+                allTasksRaw = JSON.parse(JSON.stringify(allTasksRawBackup));
+                allTasksRawBackup = null;
+                renderGantt();
+            }
+            aiPreviewBar.classList.add('hidden');
+            alert('プレビューを破棄し、元のスケジュールに復元しました。');
+        });
+    }
+
+    function renderAiChatMessages(messages) {
+        const container = document.getElementById('ai-chat-messages');
+        container.innerHTML = '';
+        if (messages.length === 0) {
+            container.innerHTML = '<div class="text-gray-500 text-center text-xs mt-4">メッセージを入力して会話を始めてください。</div>';
+            return;
+        }
+        
+        let foundProposal = false;
+
+        messages.forEach(msg => {
+            const div = document.createElement('div');
+            const isUser = msg.role === 'user';
+            div.className = `flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1 mb-3`;
+            
+            let messageHTML = '';
+            let parsedTasks = null;
+
+            if (isUser) {
+                messageHTML = `<div class="bg-blue-100 border-blue-200 border rounded-lg p-2 text-sm max-w-[90%] whitespace-pre-wrap">${escapeHTML(msg.content)}</div>`;
+            } else {
+                const parsedContent = typeof marked !== 'undefined' ? marked.parse(msg.content) : escapeHTML(msg.content);
+                messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${parsedContent}</div>`;
+
+                // メッセージテキスト内からタスク提案JSONを検出（コードブロックまたは配列の正規表現）
+                const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
+                const match = msg.content.match(jsonBlockRegex);
+                let jsonText = match ? match[1] : null;
+                
+                if (!jsonText) {
+                    const arrayMatch = msg.content.match(/\[\s*\{\s*"id"[\s\S]*?\}\s*\]/);
+                    if (arrayMatch) {
+                        jsonText = arrayMatch[0];
+                    }
+                }
+
+                if (jsonText) {
+                    try {
+                        const parsed = JSON.parse(jsonText);
+                        // 単純なタスクの配列（id, start, endを含む）であるか確認
+                        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].id && parsed[0].start && parsed[0].end) {
+                            parsedTasks = parsed;
+                        } else if (parsed.action === 'update_tasks' && Array.isArray(parsed.data)) {
+                            parsedTasks = parsed.data;
+                        }
+                    } catch (e) {
+                        // パース失敗時は無視
+                    }
+                }
+            }
+
+            div.innerHTML = `
+                <div class="text-xs text-gray-500 font-bold px-1">${isUser ? 'あなた' : 'AIアシスタント'}</div>
+                ${messageHTML}
+            `;
+
+            // タスク提案が検出された場合、自動的にプレビューを実行
+            if (parsedTasks && !isUser) {
+                foundProposal = true;
+                
+                // バックアップを一度だけ取得
+                if (!allTasksRawBackup) {
+                    allTasksRawBackup = JSON.parse(JSON.stringify(allTasksRaw));
+                }
+                
+                // 仮反映の実行
+                parsedTasks.forEach(taskProp => {
+                    const existingTask = allTasksRaw.find(t => t.task_id === taskProp.id);
+                    if (existingTask) {
+                        existingTask.start_date = taskProp.start;
+                        existingTask.end_date = taskProp.end;
+                        if (taskProp.name) existingTask.task_name = taskProp.name;
+                        if (taskProp.progress !== undefined) existingTask.progress = taskProp.progress;
+                    }
+                });
+            }
+
+            container.appendChild(div);
+        });
+
+        // 提案が検出された場合は、ガントチャートを描画更新し、スプシ風のプレビューバナーを表示
+        if (foundProposal) {
+            renderGantt();
+            if (aiPreviewBar) {
+                aiPreviewBar.classList.remove('hidden');
+            }
+        }
+
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function escapeHTML(str) {
+        return str.replace(/[&<>"']/g, function(m) {
+            return {
+                '&': '&',
+                '<': '<',
+                '>': '>',
+                '"': '"',
+                "'": '&#039;'
+            }[m];
+        });
+    }
+
+    // 期間指定によるタスク抽出
+    function getContextTextForSession(session) {
+        const sDate = moment(session.startDate);
+        const eDate = moment(session.endDate);
+        
+        // 該当期間に被るタスクを抽出
+        const activeTasks = allTasksRaw.filter(t => {
+            const ts = moment(t.start_date);
+            const te = moment(t.end_date);
+            return (ts.isSameOrBefore(eDate) && te.isSameOrAfter(sDate));
+        });
+
+        // 最低限必要な項目に絞ってJSON化
+        const simpleTasks = activeTasks.map(t => ({
+            id: t.task_id,
+            name: t.task_name,
+            char_id: t.char_id,
+            member: masters.member.find(m => m.member_id === t.member_id)?.member_name || '未定',
+            start: t.start_date,
+            end: t.end_date,
+            prog: t.progress
+        }));
+
+        let contextText = `\n--- プロジェクトコンテキスト ---\n【マスターデータ】\nキャラクター: ${JSON.stringify(masters.character.map(c=>({id:c.char_id, name:c.char_name})))}\n`;
+        contextText += `担当者: ${JSON.stringify(masters.member.map(m=>({id:m.member_id, name:m.member_name})))}\n\n`;
+        contextText += `【対象期間(${session.startDate}〜${session.endDate})のタスク】\n`;
+        contextText += JSON.stringify(simpleTasks, null, 2);
+        return contextText;
+    }
+
+    // チャット送信処理
+    const aiChatInput = document.getElementById('ai-chat-input');
+    const btnAiSend = document.getElementById('btn-ai-send');
+    if (btnAiSend && aiChatInput) {
+        // Ctrl+Enterで送信
+        aiChatInput.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                btnAiSend.click();
+            }
+        });
+
+        btnAiSend.addEventListener('click', async () => {
+            const text = aiChatInput.value.trim();
+            if (!text || !currentSessionId) return;
+
+            const aiSettings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
+            if (!aiSettings.apiKey || !aiSettings.model) {
+                alert('右上の歯車アイコンからAPIキーとモデルを設定してください。');
+                return;
+            }
+
+            // セッションデータの取得
+            let sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+            let sessionIndex = sessions.findIndex(s => s.id === currentSessionId);
+            if (sessionIndex < 0) return;
+            let session = sessions[sessionIndex];
+
+            // 履歴用のユーザーメッセージ（ファイル添付がある場合は、それとわかるよう注記）
+            const displayContent = attachedFileName ? `${text}\n\n[添付ファイル: ${attachedFileName}]` : text;
+
+            // 送信用メッセージの構築（ファイルがあれば中身を結合）
+            let sendContent = text;
+            if (attachedFileContent) {
+                sendContent += `\n\n【添付ファイル: ${attachedFileName} の中身】\n${attachedFileContent}`;
+            }
+
+            session.messages = session.messages || [];
+            session.messages.push({ role: 'user', content: displayContent });
+            
+            // 初回送信時にタイトル自動生成（簡易）
+            if (session.messages.length === 1) {
+                session.title = text.substring(0, 15) + (text.length > 15 ? '...' : '');
+                aiPanelTitle.textContent = session.title;
+            }
+            
+            renderAiChatMessages(session.messages);
+            aiChatInput.value = '';
+            btnAiSend.disabled = true;
+
+            // 送信用メッセージ履歴をディープコピーして、直近のメッセージだけ添付データ付きにする
+            const sendMessages = JSON.parse(JSON.stringify(session.messages));
+            sendMessages[sendMessages.length - 1].content = sendContent;
+
+            // 送信用システムプロンプトの構築
+            let sysPrompt = aiSettings.systemPrompt || 'あなたはプロジェクト管理アシスタントです。';
+            sysPrompt += getContextTextForSession(session);
+
+            if (currentAiMode === 'operator') {
+                sysPrompt += `
+【超重要指示 - オペレーターモード】
+あなたはユーザーの依頼に基づき、マスターデータの書き換え、追加、編集を自動で行うオペレーターです。
+マスターデータの変更が必要な場合、あなたは会話の返答の最後に「必ず」以下のJSONフォーマットをコードブロック（ \`\`\`json ... \`\`\` ）で出力してください。
+日本語の解説は、コードブロックの手前に記載してください。
+
+JSONフォーマット:
+\`\`\`json
+{
+  "action": "update_masters",
+  "data": {
+    "character": [ ...キャラクターマスタ(m_character.csv)の現在の最新全レコード... ],
+    "member": [ ...メンバーマスタ(m_member.csv)の現在の最新全レコード... ],
+    "release": [ ...リリース（バージョン）マスタ(m_release.csv)の現在の最新全レコード... ],
+    "section": [ ...セクションマスタ(m_section.csv)の現在の最新全レコード... ],
+    "task_template": [ ...タスクテンプレート(m_task_template.csv)の現在の最新全レコード... ]
+  }
+}
+\`\`\`
+※変更されたレコードだけでなく、「すべての」レコードを含めた新しい配列を返してください。既存のデータを誤って削除しないように注意し、追加または更新してください。
+現在のマスタ状態は、上のプロジェクトコンテキスト内の「マスターデータ」を参照してください。
+`;
+            }
+
+            try {
+                const res = await fetch('/api/llm/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider: aiSettings.provider,
+                        apiKey: aiSettings.apiKey,
+                        model: aiSettings.model,
+                        temperature: aiSettings.temperature,
+                        systemPrompt: sysPrompt,
+                        messages: sendMessages
+                    })
+                });
+                
+                const data = await res.json();
+                if (data.status === 'success') {
+                    session.messages.push({ role: 'assistant', content: data.reply });
+                    session.totalTokens = (session.totalTokens || 0) + data.tokens;
+                    renderAiChatMessages(session.messages);
+
+                    // オペレーターモード時の自動マスタ更新判定
+                    if (currentAiMode === 'operator') {
+                        const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
+                        const match = data.reply.match(jsonRegex);
+                        if (match) {
+                            try {
+                                const parsed = JSON.parse(match[1]);
+                                if (parsed.action === 'update_masters' && parsed.data) {
+                                    await autoUpdateMasters(parsed.data);
+                                }
+                            } catch (err) {
+                                console.error("JSONパースエラー:", err);
+                            }
+                        }
+                    }
+
+                    // 添付リセット
+                    if (btnRemoveAttachment) btnRemoveAttachment.click();
+                } else {
+                    alert('APIエラー: ' + data.message);
+                    // 失敗時はユーザーメッセージを取り消す
+                    session.messages.pop();
+                    renderAiChatMessages(session.messages);
+                    aiChatInput.value = text;
+                }
+            } catch (e) {
+                alert('通信エラーが発生しました: ' + e);
+            } finally {
+                btnAiSend.disabled = false;
+                // 保存
+                sessions[sessionIndex] = session;
+                localStorage.setItem('ai_sessions', JSON.stringify(sessions));
+            }
+        });
+    }
+
+    // マスターの自動適用・保存処理
+    async function autoUpdateMasters(newData) {
+        if (!confirm('AIオペレーターによるマスターデータ変更指示が検出されました。\nこの内容を適用し、CSVファイルを上書き保存しますか？')) {
+            return;
+        }
+        
+        try {
+            // ローカルメモリ上の masters オブジェクトをマージ
+            for (let key in newData) {
+                if (masters[key]) {
+                    masters[key] = newData[key];
+                }
+            }
+            
+            // Flaskサーバーに保存リクエストをPOST
+            const res = await fetch(`/api/masters/save?project=${currentProject}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newData)
+            });
+            const resData = await res.json();
+            if (resData.status === 'success') {
+                alert('マスターデータを自動更新し、CSVを上書き保存しました！\nページをリロードして変更を反映してください。');
+                window.location.reload();
+            } else {
+                alert('自動更新保存エラー: ' + resData.message);
+            }
+        } catch (e) {
+            alert('マスターデータの自動保存に失敗しました: ' + e);
+        }
+    }
+
+    // 期間入力のバリデーション
+    function validateNewSession() {
+        if (newSessionStart.value && newSessionEnd.value && newSessionStart.value <= newSessionEnd.value) {
+            btnStartNewSession.disabled = false;
+        } else {
+            btnStartNewSession.disabled = true;
+        }
+    }
+    if (newSessionStart && newSessionEnd) {
+        newSessionStart.addEventListener('change', validateNewSession);
+        newSessionEnd.addEventListener('change', validateNewSession);
+    }
+
+    // 新規セッション開始
+    if (btnStartNewSession) {
+        btnStartNewSession.addEventListener('click', () => {
+            const id = 'sess_' + Date.now();
+            const session = {
+                id: id,
+                title: '新規セッション',
+                startDate: newSessionStart.value,
+                endDate: newSessionEnd.value,
+                totalTokens: 0,
+                messages: []
+            };
+            const sessions = JSON.parse(localStorage.getItem('ai_sessions') || '[]');
+            sessions.push(session);
+            localStorage.setItem('ai_sessions', JSON.stringify(sessions));
+            
+            // 入力リセット
+            newSessionStart.value = '';
+            newSessionEnd.value = '';
+            validateNewSession();
+            
+            openAiSession(id);
+        });
+    }
+
+    // 戻るボタン
+    if (btnBackToSessions) {
+        btnBackToSessions.addEventListener('click', () => {
+            currentSessionId = null;
+            aiChatView.classList.add('hidden');
+            aiSessionsView.classList.remove('hidden');
+            btnBackToSessions.classList.add('hidden');
+            aiPanelTitle.textContent = 'AIセッション';
+            loadAiSessions();
+        });
+    }
+
+    // チャットパネルの開閉
+    if (btnAiChat) {
+        btnAiChat.addEventListener('click', () => {
+            aiChatPanel.classList.toggle('translate-x-full');
+            if (!aiChatPanel.classList.contains('translate-x-full')) {
+                loadAiSessions();
+            }
+        });
+    }
+    if (btnCloseAiChat) {
+        btnCloseAiChat.addEventListener('click', () => {
+            aiChatPanel.classList.add('translate-x-full');
+        });
+    }
+
+    // 設定モーダルの開閉と初期値ロード
+    if (btnAiSettings) {
+        btnAiSettings.addEventListener('click', () => {
+            aiSettingsDialog.classList.remove('hidden');
+            
+            // LocalStorageから読み込み
+            const settings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
+            if (settings.provider) aiProvider.value = settings.provider;
+            if (settings.apiKey) aiApiKey.value = settings.apiKey;
+            if (settings.temperature) {
+                aiTemperature.value = settings.temperature;
+                aiTempVal.textContent = settings.temperature;
+            }
+            if (settings.systemPrompt) aiSystemPrompt.value = settings.systemPrompt;
+            
+            // プロバイダ変更時のUI切り替え
+            aiProvider.dispatchEvent(new Event('change'));
+            
+            // もしモデルが保存されていればセット
+            if (settings.model) {
+                setTimeout(() => {
+                    if (aiProvider.value === 'claude') {
+                        aiModelManual.value = settings.model;
+                    } else {
+                        // TODO: リスト動的取得まではoptionに追加しておく
+                        if (!Array.from(aiModelSelect.options).some(opt => opt.value === settings.model)) {
+                            const opt = document.createElement('option');
+                            opt.value = settings.model;
+                            opt.textContent = settings.model;
+                            aiModelSelect.appendChild(opt);
+                        }
+                        aiModelSelect.value = settings.model;
+                    }
+                }, 50);
+            }
+        });
+    }
+
+    // プロバイダ変更イベント
+    if (aiProvider) {
+        aiProvider.addEventListener('change', () => {
+            if (aiProvider.value === 'claude') {
+                aiModelSelect.classList.add('hidden');
+                aiModelManual.classList.remove('hidden');
+                document.getElementById('btn-fetch-models').disabled = true;
+                document.getElementById('btn-fetch-models').classList.add('opacity-50');
+            } else {
+                aiModelSelect.classList.remove('hidden');
+                aiModelManual.classList.add('hidden');
+                document.getElementById('btn-fetch-models').disabled = false;
+                document.getElementById('btn-fetch-models').classList.remove('opacity-50');
+            }
+        });
+    }
+
+    // モデルリスト取得
+    const btnFetchModels = document.getElementById('btn-fetch-models');
+    if (btnFetchModels) {
+        btnFetchModels.addEventListener('click', async () => {
+            const provider = aiProvider.value;
+            const apiKey = aiApiKey.value.trim();
+            if (!apiKey) {
+                alert('APIキーを入力してください。');
+                return;
+            }
+            
+            try {
+                btnFetchModels.disabled = true;
+                btnFetchModels.textContent = '取得中...';
+                
+                const res = await fetch('/api/llm/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider, apiKey })
+                });
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    aiModelSelect.innerHTML = '';
+                    data.models.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m;
+                        opt.textContent = m;
+                        aiModelSelect.appendChild(opt);
+                    });
+                    // もし設定済みのモデルがあれば選択を復元
+                    const savedModel = JSON.parse(localStorage.getItem('ai_settings') || '{}').model;
+                    if (savedModel && Array.from(aiModelSelect.options).some(o => o.value === savedModel)) {
+                        aiModelSelect.value = savedModel;
+                    }
+                    alert('モデルリストを更新しました！');
+                } else {
+                    alert('エラー: ' + data.message);
+                }
+            } catch (e) {
+                alert('通信エラーが発生しました: ' + e);
+            } finally {
+                btnFetchModels.disabled = false;
+                btnFetchModels.textContent = '更新';
+            }
+        });
+    }
+
+    // Temperatureスライダー連動
+    if (aiTemperature) {
+        aiTemperature.addEventListener('input', (e) => {
+            aiTempVal.textContent = e.target.value;
+        });
+    }
+
+    // 設定保存
+    if (btnSaveAiSettings) {
+        btnSaveAiSettings.addEventListener('click', () => {
+            const provider = aiProvider.value;
+            const model = provider === 'claude' ? aiModelManual.value : aiModelSelect.value;
+            const settings = {
+                provider: provider,
+                apiKey: aiApiKey.value,
+                model: model,
+                temperature: parseFloat(aiTemperature.value),
+                systemPrompt: aiSystemPrompt.value
+            };
+            localStorage.setItem('ai_settings', JSON.stringify(settings));
+            aiSettingsDialog.classList.add('hidden');
+            alert('AIアシスタントの設定を保存しました。');
+        });
+    }
+
     document.getElementById('btn-apply-task').addEventListener('click', () => {
         saveHistory();
         const raw = {
