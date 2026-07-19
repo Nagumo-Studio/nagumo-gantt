@@ -70,7 +70,7 @@ def master_editor():
 def receive_log():
     data = request.get_json()
     if data:
-        print(f"\\n============================\\n[JS {data.get('type', 'INFO')}] {data.get('message', '')}\\n============================\\n")
+        print(f"\n============================\n[JS {data.get('type', 'INFO')}] {data.get('message', '')}\n============================\n")
     return jsonify({"status": "ok"})
 
 # ハートビート時刻をファイルで共有・保持する（マルチプロセス/Debugモード対応）
@@ -123,6 +123,7 @@ def get_masters():
         'character': read_csv_as_dicts(os.path.join(p_dir, 'm_character.csv')),
         'section': read_csv_as_dicts(os.path.join(p_dir, 'm_section.csv')),
         'member': read_csv_as_dicts(os.path.join(p_dir, 'm_member.csv')),
+        'status': read_csv_as_dicts(os.path.join(p_dir, 'm_status.csv')),
         'task_template': read_csv_as_dicts(os.path.join(p_dir, 'm_task_template.csv')),
         'holiday': read_csv_as_dicts(os.path.join(p_dir, 'm_holiday.csv'))
     }
@@ -161,10 +162,10 @@ def save_tasks():
                 tasks_by_section[sec_id] = []
             tasks_by_section[sec_id].append(task)
         
-        # 既存のタスクCSVをクリアするか上書きする処理
+        # 既存 of タスクCSVをクリアするか上書きする処理
         # ここでは受け取ったデータをS_xxx別に分けて t_tasks_xxx.csv に上書きする
         # （簡易的に section_id をそのままファイル名に利用）
-        fieldnames = ['task_id', 'release_id', 'char_id', 'section_id', 'task_name', 'member_id', 'start_date', 'end_date', 'progress', 'lane', 'dependencies']
+        fieldnames = ['task_id', 'release_id', 'char_id', 'section_id', 'task_name', 'member_id', 'start_date', 'end_date', 'progress', 'lane', 'dependencies', 'status_id']
         for sec_id, tasks in tasks_by_section.items():
             filepath = os.path.join(p_dir, f't_tasks_{sec_id}.csv')
             write_dicts_to_csv(filepath, fieldnames, tasks)
@@ -205,7 +206,8 @@ def save_masters():
             'release': ('m_release.csv', ['release_id', 'release_name', 'art_deadline', 'branch_deadline', 'release_date', 'event_name']),
             'character': ('m_character.csv', ['char_id', 'char_name', 'costume_name', 'category', 'usage', 'event_id']),
             'section': ('m_section.csv', ['section_id', 'section_name', 'color']),
-            'member': ('m_member.csv', ['member_id', 'member_name', 'section_id', 'color']),
+            'member': ('m_member.csv', ['member_id', 'member_name', 'display_name', 'section_id', 'bg_color', 'text_color']),
+            'status': ('m_status.csv', ['status_id', 'status_name', 'color']),
             'task_template': ('m_task_template.csv', ['template_id', 'section_id', 'task_name', 'default_days']),
             'holiday': ('m_holiday.csv', ['holiday_date', 'holiday_name', 'holiday_type'])
         }
@@ -430,4 +432,3 @@ if __name__ == '__main__':
         app.run(debug=False, port=PORT)
     else:
         app.run(debug=True, port=PORT)
-

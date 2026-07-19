@@ -237,7 +237,7 @@ async function fetchMasters() {
             filterMemberList.innerHTML = masters.member.map(m => `
                 <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 rounded cursor-pointer member-filter-item">
                     <input type="checkbox" class="member-filter-cb" value="${m.member_id}" data-name="${m.member_name}" ${currentSelected.includes(m.member_id) ? 'checked' : ''}>
-                    <span>${m.member_name}</span>
+                    <span>${m.member_name}${m.display_name ? ' (' + m.display_name + ')' : ''}</span>
                 </label>
             `).join('');
 
@@ -349,6 +349,21 @@ function setupScrollSync() {
             window.requestAnimationFrame(() => {
                 const scrollLeft = els.ganttBody.scrollLeft;
                 els.ganttHeaderContent.style.transform = `translate3d(-${scrollLeft}px, 0, 0)`;
+                
+                const stickyLabels = els.ganttHeaderContent.querySelectorAll('.js-sticky-label');
+                stickyLabels.forEach(label => {
+                    const parent = label.parentElement;
+                    const parentLeft = parseInt(parent.style.left) || 0;
+                    const parentWidth = parseInt(parent.style.width) || 0;
+                    const labelWidth = label.offsetWidth || 50;
+                    
+                    let shift = scrollLeft - parentLeft + 8; // デフォルトで8pxの余白
+                    if (shift < 8) shift = 8;
+                    if (shift > parentWidth - labelWidth - 8) shift = parentWidth - labelWidth - 8;
+                    
+                    label.style.transform = `translate3d(${shift}px, 0, 0)`;
+                });
+                
                 ticking = false;
             });
             ticking = true;
@@ -580,6 +595,8 @@ function renderHeaderAndGrid(totalWidth) {
     const counts = {};
     taskDates.forEach(d => counts[d] = (counts[d] || 0) + 1);
 
+    let currentWeekMaxCount = 0;
+
     for (let d = 0; d < ganttConfig.totalDays; d++) {
         const dateStr = currentM.format('YYYY-MM-DD');
         const dayOfWeek = currentM.day();
@@ -603,6 +620,9 @@ function renderHeaderAndGrid(totalWidth) {
         
         let dayBorder = borderClass.replace('gantt-grid-line pointer-events-none', '').trim();
         
+        const count = counts[dateStr] || 0;
+        currentWeekMaxCount = Math.max(currentWeekMaxCount, count);
+
         if (isWeekView) {
             const nextM = currentM.clone().add(1, 'days');
             if (nextM.day() === 1 || nextM.date() === 1 || d === ganttConfig.totalDays - 1) {
@@ -610,29 +630,47 @@ function renderHeaderAndGrid(totalWidth) {
                 const left = weekStartDays * ganttConfig.dayWidth;
                 if (dateOfMonth === 1) currentWeekNum = 1;
                 bottomHtml += `<div class="gantt-header-cell ${dayBorder}" style="left:${left}px; width:${width}px; border-left:1px dashed #888;">${currentWeekNum}W</div>`;
+                
+                if (currentWeekMaxCount > 0) {
+                    let heatColor = 'rgba(134, 239, 172, 0.8)';
+                    if (currentWeekMaxCount >= 5) heatColor = 'rgba(239, 68, 68, 0.8)';
+                    else if (currentWeekMaxCount >= 3) heatColor = 'rgba(245, 158, 11, 0.8)';
+                    if (filterSectionId) heatColor = 'rgba(96, 165, 250, 0.8)';
+
+                    const maxLineHeight = 5;
+                    const heightPercent = Math.min((currentWeekMaxCount / maxLineHeight) * 100, 100);
+                    
+                    heatmapHtml += `
+                        <div class="absolute bottom-0 border-r border-gray-200 pointer-events-none" style="left:${left}px; width:${width}px; height:48px;">
+                            <div class="absolute bottom-0 left-0 w-full" style="height:${heightPercent}%; background-color:${heatColor};"></div>
+                            <div class="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[10px] font-bold text-gray-800">${currentWeekMaxCount}</div>
+                        </div>
+                    `;
+                }
+
                 weekStartDays = d + 1;
                 currentWeekNum++;
+                currentWeekMaxCount = 0;
             }
         } else {
             bottomHtml += `<div class="gantt-header-cell ${dayBorder} ${bgClass}" style="left:${d * ganttConfig.dayWidth}px; width:${ganttConfig.dayWidth}px;">${dateOfMonth}</div>`;
-        }
-
-        const count = counts[dateStr] || 0;
-        if (count > 0) {
-            let heatColor = 'rgba(134, 239, 172, 0.8)';
-            if (count >= 5) heatColor = 'rgba(239, 68, 68, 0.8)';
-            else if (count >= 3) heatColor = 'rgba(245, 158, 11, 0.8)';
-            if (filterSectionId) heatColor = 'rgba(96, 165, 250, 0.8)';
-
-            const maxLineHeight = 5;
-            const heightPercent = Math.min((count / maxLineHeight) * 100, 100);
             
-            heatmapHtml += `
-                <div class="absolute bottom-0 border-r border-gray-200 pointer-events-none" style="left:${d * ganttConfig.dayWidth}px; width:${ganttConfig.dayWidth}px; height:48px;">
-                    <div class="absolute bottom-0 left-0 w-full" style="height:${heightPercent}%; background-color:${heatColor};"></div>
-                    <div class="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[10px] font-bold text-gray-800">${count}</div>
-                </div>
-            `;
+            if (count > 0) {
+                let heatColor = 'rgba(134, 239, 172, 0.8)';
+                if (count >= 5) heatColor = 'rgba(239, 68, 68, 0.8)';
+                else if (count >= 3) heatColor = 'rgba(245, 158, 11, 0.8)';
+                if (filterSectionId) heatColor = 'rgba(96, 165, 250, 0.8)';
+
+                const maxLineHeight = 5;
+                const heightPercent = Math.min((count / maxLineHeight) * 100, 100);
+                
+                heatmapHtml += `
+                    <div class="absolute bottom-0 border-r border-gray-200 pointer-events-none" style="left:${d * ganttConfig.dayWidth}px; width:${ganttConfig.dayWidth}px; height:48px;">
+                        <div class="absolute bottom-0 left-0 w-full" style="height:${heightPercent}%; background-color:${heatColor};"></div>
+                        <div class="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[10px] font-bold text-gray-800">${count}</div>
+                    </div>
+                `;
+            }
         }
         
         currentM.add(1, 'days');
@@ -640,7 +678,7 @@ function renderHeaderAndGrid(totalWidth) {
         if (currentM.month() !== currentMonth || d === ganttConfig.totalDays - 1) {
             const width = (d - monthStartDays + 1) * ganttConfig.dayWidth;
             const left = monthStartDays * ganttConfig.dayWidth;
-            monthHtml += `<div class="gantt-header-cell gantt-grid-line-month" style="left:${left}px; width:${width}px; font-size:14px;">${currentMonth + 1}月</div>`;
+            monthHtml += `<div class="gantt-header-cell gantt-grid-line-month overflow-hidden" style="left:${left}px; width:${width}px; height:100%; font-size:14px; justify-content: flex-start;"><span class="js-sticky-label inline-block z-10" style="transform: translate3d(8px, 0, 0);">${currentMonth + 1}月</span></div>`;
             monthStartDays = d + 1;
             currentMonth = currentM.month();
             if (isWeekView) currentWeekNum = 1;
@@ -649,7 +687,7 @@ function renderHeaderAndGrid(totalWidth) {
         if (currentM.year() !== currentYear || d === ganttConfig.totalDays - 1) {
             const width = (d - yearStartDays + 1) * ganttConfig.dayWidth;
             const left = yearStartDays * ganttConfig.dayWidth;
-            yearHtml += `<div class="gantt-header-cell" style="left:${left}px; width:${width}px; border-left:2px solid #333; font-size:16px;">${currentYear}年</div>`;
+            yearHtml += `<div class="gantt-header-cell overflow-hidden" style="left:${left}px; width:${width}px; height:100%; border-left:2px solid #333; font-size:16px; justify-content: flex-start;"><span class="js-sticky-label inline-block z-10" style="transform: translate3d(8px, 0, 0);">${currentYear}年</span></div>`;
             yearStartDays = d + 1;
             currentYear = currentM.year();
         }
@@ -730,8 +768,12 @@ function renderTasks() {
         const section = getMasterItem('section', 'section_id', t.section_id);
         const member = getMasterItem('member', 'member_id', t.member_id);
         const bgColor = section ? section.color : '#3b82f6';
-        const memberColor = member ? member.color : '#9ca3af';
-        const memberName = member ? member.member_name : '未定';
+        const memberBg = member ? member.bg_color : '#9ca3af';
+        const memberText = member ? member.text_color : '#ffffff';
+        const memberName = member ? (member.display_name || member.member_name) : '未定';
+        const status = getMasterItem('status', 'status_id', t.status_id);
+        const statusColor = status ? status.color : '#9ca3af';
+        const statusName = status ? status.status_name : '未着手';
         const progress = parseInt(t.progress) || 0;
         
         const taskTop = y + (level * (taskHeight + margin)) + (ganttConfig.rowHeight - taskHeight) / 2;
@@ -742,7 +784,8 @@ function renderTasks() {
             <div class="gantt-task-item ${completedClass} ${selectedClass}" data-task-id="${t.task_id}" style="left:${x}px; top:${taskTop}px; width:${width}px; height:${taskHeight}px; z-index:20;">
                 <div class="gantt-task-bg" style="background-color:${bgColor};"></div>
                 <div class="gantt-task-progress" style="width:${progress}%; background-color:${bgColor};"></div>
-                <div class="gantt-member-badge" style="background-color:${memberColor};">${memberName}</div>
+                <div class="absolute top-0 left-0 w-full z-10" style="height: 4px; background-color:${statusColor}; border-radius: 2px 2px 0 0;"></div>
+                <div class="gantt-member-badge" style="background-color:${memberBg}; color:${memberText};">${memberName}</div>
                 <div class="gantt-task-name">${t.task_name}</div>
                 <div class="gantt-resize-handle gantt-resize-handle-left" data-action="resize-left"></div>
                 <div class="gantt-resize-handle gantt-resize-handle-right" data-action="resize-right"></div>
@@ -1230,8 +1273,11 @@ function setupMouseTracking() {
             if (t) {
                 const section = getMasterItem('section', 'section_id', t.section_id);
                 const member = getMasterItem('member', 'member_id', t.member_id);
+                const status = getMasterItem('status', 'status_id', t.status_id);
                 const secName = section ? section.section_name : '未定';
                 const memName = member ? member.member_name : '未定';
+                const statName = status ? status.status_name : '未着手';
+                const statColor = status ? status.color : '#9ca3af';
                 
                 let bizDays = 0;
                 const startM = moment(t.start_date).startOf('day');
@@ -1248,6 +1294,7 @@ function setupMouseTracking() {
                 document.getElementById('task-detail-body').innerHTML = `
                     <div>セクション: ${secName}</div>
                     <div>担当者: ${memName}</div>
+                    <div class="flex items-center gap-1">ステータス: <span class="px-1.5 py-0.5 rounded text-white text-[10px] font-bold" style="background-color:${statColor};">${statName}</span></div>
                     <div>期間: ${t.start_date} 〜 ${t.end_date}</div>
                     <div>予定工数: ${bizDays} 営業日</div>
                     <div>進捗: ${t.progress || 0}%</div>
@@ -2054,7 +2101,7 @@ function populateDropdowns() {
 
 function setupMiscEvents() {
     // フォームバリデーション用のイベント登録
-    const editFields = ['edit-release', 'edit-character-name', 'edit-character-costume', 'edit-section', 'edit-task-name', 'edit-member', 'edit-start', 'edit-end', 'edit-progress'];
+    const editFields = ['edit-release', 'edit-character-name', 'edit-character-costume', 'edit-section', 'edit-task-name', 'edit-member', 'edit-start', 'edit-end', 'edit-progress', 'edit-status'];
     editFields.forEach(id => {
         const el = document.getElementById(id);
         if(el) {
@@ -2095,7 +2142,7 @@ function setupMiscEvents() {
         const members = masters.member.filter(m => m.section_id === secId);
         const templates = masters.task_template.filter(t => t.section_id === secId);
         const selM = document.getElementById('edit-member');
-        selM.innerHTML = members.map(m => `<option value="${m.member_id}">${m.member_name}</option>`).join('');
+        selM.innerHTML = members.map(m => `<option value="${m.member_id}">${m.member_name}${m.display_name ? ' (' + m.display_name + ')' : ''}</option>`).join('');
         const selT = document.getElementById('edit-task-name');
         selT.innerHTML = '<option value="">手入力または選択</option>' + templates.map(t => `<option value="${t.task_name}" data-days="${t.default_days}">${t.task_name}</option>`).join('');
     });
@@ -2973,8 +3020,17 @@ JSONフォーマット:
             start_date: document.getElementById('edit-start').value,
             end_date: document.getElementById('edit-end').value,
             progress: document.getElementById('edit-progress').value,
+            status_id: document.getElementById('edit-status').value,
             lane: document.getElementById('edit-task-id').value ? (allTasksRaw.find(t=>t.task_id === document.getElementById('edit-task-id').value).lane || '1') : '1'
         };
+
+        // 依存関係を引き継ぐ
+        if (document.getElementById('edit-task-id').value) {
+            const existing = allTasksRaw.find(t => t.task_id === document.getElementById('edit-task-id').value);
+            if (existing) {
+                raw.dependencies = existing.dependencies;
+            }
+        }
 
         const targetIdx = allTasksRaw.findIndex(t => t.task_id === raw.task_id);
         if (targetIdx >= 0) {
@@ -3269,8 +3325,25 @@ JSONフォーマット:
     
     // els.ganttTasks.addEventListener('dblclick', (e) => {
     // ダブルクリックによるエディタ展開は廃止（コンテキストメニューに移行）
-    els.ganttTasks.addEventListener('dblclick', (e) => {
-        // 何もしない、または必要であれば他の処理
+    // -> ユーザー要望により復元
+    els.ganttBody.addEventListener('dblclick', (e) => {
+        const taskEl = e.target.closest('.gantt-task-item');
+        if (taskEl) {
+            const taskId = taskEl.getAttribute('data-task-id');
+            if (taskId) {
+                openEditor(taskId, 'task');
+            }
+        } else {
+            const rect = els.ganttBodyContent.getBoundingClientRect();
+            const mouseY = e.clientY - rect.top;
+            const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
+            if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
+                const group = ganttConfig.groups[rowIndex];
+                if (group && (group.type === 'release' || group.type === 'character')) {
+                    openEditor(group, 'group');
+                }
+            }
+        }
     });
 
     els.ganttBody.addEventListener('contextmenu', (e) => {
@@ -3365,7 +3438,17 @@ JSONフォーマット:
         // 入力フォーム等にフォーカスがある場合はスキップ
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
 
-        if (e.ctrlKey && e.key === 'c') {
+        if (e.ctrlKey && e.code === 'KeyZ') {
+            e.preventDefault();
+            if (e.shiftKey) {
+                if (typeof performRedo === 'function') performRedo();
+            } else {
+                if (typeof performUndo === 'function') performUndo();
+            }
+        } else if (e.ctrlKey && e.code === 'KeyY') {
+            e.preventDefault();
+            if (typeof performRedo === 'function') performRedo();
+        } else if (e.ctrlKey && e.key === 'c') {
             if (currentTaskContextId) {
                 const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
                 if (t) copiedTaskRaw = JSON.parse(JSON.stringify(t));

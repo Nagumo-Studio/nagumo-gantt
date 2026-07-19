@@ -82,17 +82,22 @@ body, html {
 
 /* タスク内の担当者バッジ */
 .gantt-member-badge {
-    padding: calc(2px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
-    border-radius: calc(12px * var(--ui-scale, 1));
-    font-size: calc(10px * var(--ui-scale, 1));
+    padding: 0 calc(4px * var(--ui-scale, 1));
+    line-height: calc(12px * var(--ui-scale, 1));
+    height: calc(12px * var(--ui-scale, 1));
+    border-radius: calc(6px * var(--ui-scale, 1));
+    font-size: calc(8.5px * var(--ui-scale, 1));
     font-weight: bold;
     color: #fff;
     white-space: nowrap;
     margin-left: 2px;
     margin-right: calc(4px * var(--ui-scale, 1));
+    margin-top: calc(4px * var(--ui-scale, 1));
     z-index: 10;
     box-shadow: 0 1px 2px rgba(0,0,0,0.3);
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
 }
 
 /* タスク名 */
@@ -104,6 +109,7 @@ body, html {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    margin-top: calc(3px * var(--ui-scale, 1));
     z-index: 10;
     flex-grow: 1;
 }

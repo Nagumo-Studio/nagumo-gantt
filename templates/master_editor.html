@@ -21,6 +21,7 @@
             <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="character">キャラクター</button>
             <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="section">セクション</button>
             <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="member">メンバー</button>
+            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="status">ステータス</button>
             <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="task_template">タスク雛形</button>
             <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="holiday">休日</button>
         </div>
@@ -35,7 +36,8 @@
             release: ['release_id', 'release_name', 'art_deadline', 'branch_deadline', 'release_date', 'event_name'],
             character: ['char_id', 'char_name', 'costume_name', 'category', 'usage', 'event_id'],
             section: ['section_id', 'section_name', 'color'],
-            member: ['member_id', 'member_name', 'section_id', 'color'],
+            member: ['member_id', 'member_name', 'display_name', 'section_id', 'bg_color', 'text_color'],
+            status: ['status_id', 'status_name', 'color'],
             task_template: ['template_id', 'section_id', 'task_name', 'default_days'],
             holiday: ['holiday_date', 'holiday_name', 'holiday_type']
         };

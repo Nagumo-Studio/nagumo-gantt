@@ -1,0 +1,6 @@
+status_id,status_name,color
+ST_001,未着手,#9CA3AF
+ST_002,対応中,#3B82F6
+ST_003,修正中,#F59E0B
+ST_004,保留,#EF4444
+ST_005,完了,#10B981
