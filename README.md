@@ -20,8 +20,10 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 </div> 
 
 - **🤖 AIアシスタント機能 & コスト自動試算**: 各種LLM（ChatGPT, Claude, Gemini等）と連携できるチャットビューを搭載。各メッセージごとの消費トークン数およびリアルタイムでの消費コスト（ドル・日本円換算）の目安自動試算表示機能を完備。
-  > **🎥 【撮影予定GIF 3】**: 設定を開き、プロバイダ切り替えでAPIキーとモデルがパッと切り替わり、チャット送信後にメッセージ下にドル/円建て目安料金が表示されるデモ操作。
-  > `<!-- TODO: ここに gif/ai_cost_calculation.gif を配置 -->`
+<div align="center">
+  <img height="256" alt="Readme_003" src="https://github.com/user-attachments/assets/bdfcc8d4-759f-4482-a643-7f0b67c15e88" />
+  <img height="256" alt="Readme_004" src="https://github.com/user-attachments/assets/9de015ef-b528-442f-adf4-365b8cbb3862" />
+</div> 
 
 - **⚡ イナズマ線 (Progress Line) と Today線**: 本日日付（オレンジ色のToday線）を基準に、進捗の遅延・順調を視覚化（遅延は赤、順調は青）。一目でプロジェクトの健康状態を把握可能です。
   > **🎥 【撮影予定GIF 4】**: 「イナズマ線」ボタンをトグルし、進捗率に合わせて赤と青の稲妻がToday線に向かって伸び縮みするデモ操作。
