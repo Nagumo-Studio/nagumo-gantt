@@ -9,32 +9,27 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 - **⚡ 超軽量・高速描画**: Vanilla JSによるスクラッチ開発。重い外部描画ライブラリに依存せず、大量のタスクを配置してもサクサク動作します。
 
 - **🔗 ドラッグ結線と連動押し出し (ドミノシフト)**: タスクのコネクタからドラッグ＆ドロップするだけで、直感的にベジェ曲線の美しい依存関係（結線）を作成できます。先行タスクのスケジュールが遅れて後続タスクに食い込んだ場合、後続タスクとその先のタスクまで再帰的に自動シフトします。
-<div align="center">
-  <img width="273" height="197" alt="image" src="https://github.com/user-attachments/assets/ebe4387e-f289-4ea7-a361-d1c276df197a" />
-</div>
+
+	<img width="273" height="197" alt="image" src="https://github.com/user-attachments/assets/ebe4387e-f289-4ea7-a361-d1c276df197a" />
 
 - **🟦 複数矩形選択 (範囲選択)**: ShiftキーまたはCtrlキーを押しながらドラッグすることで範囲選択が可能。複数のタスクを一瞬で一括選択し、島ごとにまとめて一気に移動・調整することが可能です。
-<div align="center">
-<img height="128" alt="image" src="https://github.com/user-attachments/assets/d5887bb0-eceb-47c9-9730-216a3a025a01" />
-</div>
+
+	<img height="128" alt="image" src="https://github.com/user-attachments/assets/d5887bb0-eceb-47c9-9730-216a3a025a01" />
 
 - **🤖 AIアシスタント機能 & コスト自動試算**: 各種LLM（ChatGPT, Claude, Gemini等）と連携できるチャットビューを搭載。各メッセージごとの消費トークン数およびリアルタイムでの消費コスト（ドル・日本円換算）の目安自動試算表示機能を完備。
-<div align="center">
-  <img height="256" alt="image" src="https://github.com/user-attachments/assets/b92bbfa5-7b40-4721-897a-cada917004b0" />
-  <img height="256" alt="image" src="https://github.com/user-attachments/assets/085e0816-5137-4c87-bb8c-6c40e95b7e1f" />
-  <img height="256" alt="image" src="https://github.com/user-attachments/assets/74455dc8-8bf1-4be4-90f2-f611d7d1c04f" />
-
-</div> 
+	<div>
+  	<img height="256" alt="image" src="https://github.com/user-attachments/assets/b92bbfa5-7b40-4721-897a-cada917004b0" />
+  	<img height="256" alt="image" src="https://github.com/user-attachments/assets/085e0816-5137-4c87-bb8c-6c40e95b7e1f" />
+  	<img height="256" alt="image" src="https://github.com/user-attachments/assets/74455dc8-8bf1-4be4-90f2-f611d7d1c04f" />
+	</div> 
 
 - **⚡ イナズマ線 (Progress Line) と Today線**: 本日日付（オレンジ色のToday線）を基準に、進捗の遅延・順調を視覚化（遅延は赤、順調は青）。一目でプロジェクトの健康状態を把握可能です。
-<div align="center">
-  <img height="256" alt="image" src="https://github.com/user-attachments/assets/f1b60827-1bc3-43aa-8399-d17f9d1b16b5" />
-</div> 
+
+	<img height="256" alt="image" src="https://github.com/user-attachments/assets/f1b60827-1bc3-43aa-8399-d17f9d1b16b5" />
 
 - **💾 CSV / マスターデータ連携**: マスターデータ（担当者、ステータス、キャラクター、バージョン等）をUIから直感的に管理でき、データはCSVとして保存・出力されます。
-<div align="center">
-  <img height="256" alt="image" src="https://github.com/user-attachments/assets/0c499259-9e0b-4331-84ee-92a6721fc447" />
-</div> 
+
+	<img height="256" alt="image" src="https://github.com/user-attachments/assets/0c499259-9e0b-4331-84ee-92a6721fc447" />
 
 - **🔍 直感的なズーム & パン操作（マウスホイール連動）**: `マウスホイール` のスクロールでカーソル位置を起点にした超高速な日付ズーム（拡大・縮小）が可能です。また、`Ctrl + ホイール` でガントチャートの行の高さ（縦幅）を無段階に拡縮でき、さらに背景をドラッグ＆ドロップするだけで縦横無尽に画面をパン移動できます。
 
