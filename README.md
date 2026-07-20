@@ -33,6 +33,11 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 
 - **🔍 直感的なズーム & パン操作（マウスホイール連動）**: `マウスホイール` のスクロールでカーソル位置を起点にした超高速な日付ズーム（拡大・縮小）が可能です。また、`Ctrl + ホイール` でガントチャートの行の高さ（縦幅）を無段階に拡縮でき、さらに背景をドラッグ＆ドロップするだけで縦横無尽に画面をパン移動できます。
 
+	<div>
+	<img height="256" alt="Readme_001" src="https://github.com/user-attachments/assets/ca4734b7-4d98-421b-a0bd-7c508aabeb1d" />
+	<img height="256" alt="Readme_002" src="https://github.com/user-attachments/assets/1775689d-afdb-4b30-9e8f-00cf78a463c7" />
+	</div> 
+
 - **🔥 リアルタイム稼働Line数（ヒートマップ）表示**: ガントチャートのヘッダー最上部に、日ごとのアサイン人数（稼働Line数）を動的集計してヒートマップ形式で表示。特定の日に負荷が集中していないか一目で確認できます。
 
 ---
