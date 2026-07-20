@@ -30,9 +30,7 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 	</div> 
 
 - **⚡ イナズマ線（Progress Line）と オレンジ発光Today線**: 本日日付（オレンジ色のネオン発光Today線）を基準に、進捗の遅延・順調を視覚化（遅延は赤の稲妻、順調は青の稲妻）。日数差に応じて透過率が動的に変化し、一目でプロジェクトの健康状態を把握可能です。
-
-	<img width="512" alt="image" src="https://github.com/user-attachments/assets/a6f0c138-7bab-4326-8672-7c8f2d29f4c9" />
-
+	<img width="256" alt="image" src="https://github.com/user-attachments/assets/8c3f8ed1-7aed-4b87-8f70-c4adbcd30890" />
 
 - **💾 CSV / マスターデータ連携**: 担当者・ステータス・キャラクター・バージョンなどのマスターデータをUIから直感的に管理でき、データはシームレスにCSVとして保存・出力されます。
 
