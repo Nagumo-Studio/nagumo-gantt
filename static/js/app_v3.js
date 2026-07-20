@@ -69,6 +69,17 @@ function getModelPricing(modelName) {
     return null;
 }
 
+function getNowDateTimeString() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const h = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    return `${y}/${m}/${d} ${h}:${min}:${s}`;
+}
+
 function getUsdJpyRate() {
     if (MODEL_PRICING && MODEL_PRICING['USD_JPY']) {
         return MODEL_PRICING['USD_JPY'].input;
@@ -2843,15 +2854,24 @@ function setupMiscEvents() {
                     });
                     imagesHTML += '</div>';
                 }
-                messageHTML = `<div class="bg-blue-100 border-blue-200 border rounded-lg p-2 text-sm max-w-[90%] whitespace-pre-wrap">${escapeHTML(msg.content)}${imagesHTML}</div>`;
+                const dateHeader = msg.timestamp ? `<div class="text-[10px] text-blue-600/70 font-semibold mb-1 select-none">📅 ${msg.timestamp}</div>` : '';
+                messageHTML = `<div class="bg-blue-100 border-blue-200 border rounded-lg p-2 text-sm max-w-[90%] whitespace-pre-wrap">${dateHeader}${escapeHTML(msg.content)}${imagesHTML}</div>`;
             } else if (msg.role === 'process') {
                 const isActive = msg.status === 'active';
-                const icon = isActive 
-                    ? `<span class="animate-spin h-3 w-3 text-blue-500 rounded-full border-2 border-t-transparent flex-shrink-0"></span>` 
-                    : `<span class="text-green-500 font-bold flex-shrink-0 select-none">✔️</span>`;
-                const bgClass = isActive 
-                    ? 'bg-blue-50/40 border-blue-200/50 border border-dashed animate-pulse text-blue-700' 
-                    : 'bg-gray-50 border-gray-200 border text-gray-500';
+                const isErrorStatus = msg.status === 'error';
+                let icon = `<span class="text-green-500 font-bold flex-shrink-0 select-none">✔️</span>`;
+                if (isActive) {
+                    icon = `<span class="animate-spin h-3 w-3 text-blue-500 rounded-full border-2 border-t-transparent flex-shrink-0"></span>`;
+                } else if (isErrorStatus) {
+                    icon = `<span class="text-red-500 font-bold flex-shrink-0 select-none">❌</span>`;
+                }
+                
+                let bgClass = 'bg-gray-50 border-gray-200 border text-gray-500';
+                if (isActive) {
+                    bgClass = 'bg-blue-50/40 border-blue-200/50 border border-dashed animate-pulse text-blue-700';
+                } else if (isErrorStatus) {
+                    bgClass = 'bg-red-50/40 border-red-200/50 border border-dashed text-red-700 font-semibold';
+                }
 
                 messageHTML = `
 <details class="${bgClass} rounded-lg p-2 text-xs max-w-[90%] select-none shadow-sm mb-1" ${isActive ? 'open' : ''}>
@@ -2920,7 +2940,8 @@ function setupMiscEvents() {
 </div>`;
                 }
 
-                messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${parsedContent}${tokenFooter}</div>`;
+                const dateHeader = msg.timestamp ? `<div class="text-[10px] text-gray-500/70 font-semibold mb-1 select-none">📅 ${msg.timestamp}</div>` : '';
+                messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${dateHeader}${parsedContent}${tokenFooter}</div>`;
 
                 // メッセージテキスト内からタスク提案JSONを検出（コードブロックまたは配列の正規表現）
                 const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -3210,7 +3231,8 @@ function setupMiscEvents() {
             session.messages.push({ 
                 role: 'user', 
                 content: displayContent,
-                images: [...attachedImages] // 添付画像を履歴用に保存
+                images: [...attachedImages], // 添付画像を履歴用に保存
+                timestamp: getNowDateTimeString()
             });
             
             // 初回送信時にタイトル自動生成（簡易）
@@ -3312,7 +3334,7 @@ function setupMiscEvents() {
                     output_tokens: data1.output_tokens,
                     model: aiSettings.model,
                     responseTime: elapsedSeconds,
-                    timestamp: currentTimeStr
+                    timestamp: getNowDateTimeString()
                 });
 
                 session.totalTokens = (session.totalTokens || 0) + finalTokens;
@@ -3326,6 +3348,10 @@ function setupMiscEvents() {
                 if (btnRemoveAttachment) btnRemoveAttachment.click();
 
             } catch (e) {
+                p1.status = 'error';
+                p1.details = e.message || e;
+                p1.time = ((Date.now() - startTime) / 1000).toFixed(1);
+
                 if (e.name === 'AbortError') {
                     session.messages.push({ role: 'error', content: 'ユーザーによって処理が中断されました。' });
                     renderAiChatMessages(session.messages, false);
@@ -3532,7 +3558,7 @@ function setupMiscEvents() {
                     triggerModelInputVisibility();
                 }, 50);
             } else {
-                aiModelSelect.value = aiModelSelect.options[0] ? aiModelSelect.options[0].value : '__MANUAL__';
+                aiModelSelect.value = '';
                 triggerModelInputVisibility();
             }
         });
@@ -3544,6 +3570,12 @@ function setupMiscEvents() {
             const provider = aiProvider.value;
             
             aiModelSelect.innerHTML = '';
+            
+            // 選択用の空オプションを追加
+            const emptyOpt = document.createElement('option');
+            emptyOpt.value = '';
+            emptyOpt.textContent = '--- 選択してください ---';
+            aiModelSelect.appendChild(emptyOpt);
             
             const models = MASTER_MODELS[provider] || [];
             models.forEach(m => {
@@ -3560,6 +3592,41 @@ function setupMiscEvents() {
             
             document.getElementById('btn-fetch-models').disabled = false;
             document.getElementById('btn-fetch-models').classList.remove('opacity-50');
+            
+            // プロバイダ別のAPIキーをロードしてフォームに補完
+            const apiKeys = JSON.parse(localStorage.getItem('ai_api_keys') || '{}');
+            if (apiKeys[provider] !== undefined) {
+                aiApiKey.value = apiKeys[provider];
+            } else {
+                // 初回などで個別キーがない場合、既存のsettings.apiKeyがあればそれを一時的にセット
+                const settings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
+                if (settings.provider === provider && settings.apiKey) {
+                    aiApiKey.value = settings.apiKey;
+                } else {
+                    aiApiKey.value = '';
+                }
+            }
+            
+            // プロバイダ別の選択モデルをロードして補完
+            const savedModels = JSON.parse(localStorage.getItem('ai_models') || '{}');
+            const targetModel = savedModels[provider];
+            if (targetModel) {
+                const hasOption = Array.from(aiModelSelect.options).some(opt => opt.value === targetModel);
+                if (hasOption) {
+                    aiModelSelect.value = targetModel;
+                } else {
+                    // もしモデルリストに無い場合は、手動入力用フィールドに値があれば復元
+                    const settings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
+                    if (settings.provider === provider && settings.model === targetModel) {
+                        aiModelSelect.value = '__MANUAL__';
+                        aiModelManual.value = targetModel;
+                    } else {
+                        aiModelSelect.value = ''; // 存在しない場合は未選択
+                    }
+                }
+            } else {
+                aiModelSelect.value = ''; // 保存されてない場合は未選択
+            }
             
             triggerModelInputVisibility();
         });
@@ -3663,6 +3730,17 @@ function setupMiscEvents() {
                 usdJpyRate: parseFloat(document.getElementById('ai-usd-jpy-rate').value || getUsdJpyRate())
             };
             localStorage.setItem('ai_settings', JSON.stringify(settings));
+            
+            // プロバイダ別のAPIキーを保存
+            const apiKeys = JSON.parse(localStorage.getItem('ai_api_keys') || '{}');
+            apiKeys[provider] = aiApiKey.value.trim();
+            localStorage.setItem('ai_api_keys', JSON.stringify(apiKeys));
+
+            // プロバイダ別の選択モデルを保存
+            const savedModels = JSON.parse(localStorage.getItem('ai_models') || '{}');
+            savedModels[provider] = model;
+            localStorage.setItem('ai_models', JSON.stringify(savedModels));
+
             aiSettingsDialog.classList.add('hidden');
             alert('AIアシスタントの設定を保存しました。');
         });
