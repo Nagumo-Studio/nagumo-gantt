@@ -17,3 +17,10 @@ __pycache__/
 build/
 dist/
 *.spec
+
+# Temp scripts from AI edits
+fix*.py
+test.py
+
+# Backups and archives
+*.zip
