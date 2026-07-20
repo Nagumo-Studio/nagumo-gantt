@@ -8,6 +8,9 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 
 - **⚡ 超軽量・高速描画**: Vanilla JSによるスクラッチ開発。重い外部描画ライブラリに依存せず、大量のタスクを配置してもサクサク動作します。
 
+	<img height="512" alt="image" src="https://github.com/user-attachments/assets/df7fe87f-fb0d-43cc-b95c-40750d04ad1d" />
+
+
 - **🔗 ドラッグ結線と連動押し出し (ドミノシフト)**: タスクのコネクタからドラッグ＆ドロップするだけで、直感的にベジェ曲線の美しい依存関係（結線）を作成できます。先行タスクのスケジュールが遅れて後続タスクに食い込んだ場合、後続タスクとその先のタスクまで再帰的に自動シフトします。
 
 	<img width="273" height="197" alt="image" src="https://github.com/user-attachments/assets/ebe4387e-f289-4ea7-a361-d1c276df197a" />
