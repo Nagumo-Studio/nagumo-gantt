@@ -8,7 +8,7 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 
 - **⚡ 超軽量・高速描画（完全自作スクラッチ設計）**: Vis.jsやDHTMLX Ganttといった既存ライブラリを一切排除し、Vanilla JS（ピュアJavaScript）とTailwind CSSのみで描画エンジンを完全自作。ライブラリ特有の制約（同じ行に2つのタスクを置けないなど）やDOMのブラックボックス化がゼロ。100%制御されているため、大量のタスクを配置しても非常に軽量・サクサク動作します。
 
-	<img height="512" alt="image" src="https://github.com/user-attachments/assets/df7fe87f-fb0d-43cc-b95c-40750d04ad1d" />
+	<img height="256" alt="image" src="https://github.com/user-attachments/assets/df7fe87f-fb0d-43cc-b95c-40750d04ad1d" />
 
 - **🔗 ドラッグ結線と連動押し出し（ドミノシフト）**: タスクの右端コネクタからドラッグ＆ドロップするだけで、美しいベジェ曲線の依存関係（結線）を直感的に作成。先行タスクのスケジュールが未来（右）に遅れると、影響を受けるすべての後続タスクがドミノ倒しのように再帰的に自動で押し出されます（ドミノシフト）。
 
@@ -31,7 +31,8 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 
 - **⚡ イナズマ線（Progress Line）と オレンジ発光Today線**: 本日日付（オレンジ色のネオン発光Today線）を基準に、進捗の遅延・順調を視覚化（遅延は赤の稲妻、順調は青の稲妻）。日数差に応じて透過率が動的に変化し、一目でプロジェクトの健康状態を把握可能です。
 
-	<img height="256" alt="image" src="https://github.com/user-attachments/assets/f1b60827-1bc3-43aa-8399-d17f9d1b16b5" />
+	<img width="512" alt="image" src="https://github.com/user-attachments/assets/a6f0c138-7bab-4326-8672-7c8f2d29f4c9" />
+
 
 - **💾 CSV / マスターデータ連携**: 担当者・ステータス・キャラクター・バージョンなどのマスターデータをUIから直感的に管理でき、データはシームレスにCSVとして保存・出力されます。
 
