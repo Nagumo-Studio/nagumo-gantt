@@ -1090,6 +1090,7 @@ function renderTasks() {
         const section = getMasterItem('section', 'section_id', t.section_id);
         const member = getMasterItem('member', 'member_id', t.member_id);
         const bgColor = section ? section.color : '#3b82f6';
+        const textColor = section && section.text_color ? section.text_color : '#000000'; // セクションごとのテキスト色を取得
         const memberBg = member ? member.bg_color : '#9ca3af';
         const memberText = member ? member.text_color : '#ffffff';
         const memberName = member ? (member.display_name || member.member_name) : '未定';
@@ -1108,7 +1109,7 @@ function renderTasks() {
                 <div class="gantt-task-progress" style="width:${progress}%; background-color:${bgColor};"></div>
                 <div class="absolute top-0 left-0 w-full z-10" style="height: 4px; background-color:${statusColor}; border-radius: 2px 2px 0 0;"></div>
                 <div class="gantt-member-badge" style="background-color:${memberBg}; color:${memberText};">${memberName}</div>
-                <div class="gantt-task-name">${t.task_name}</div>
+                <div class="gantt-task-name" style="color: ${textColor};">${t.task_name}</div>
                 <div class="gantt-resize-handle gantt-resize-handle-left" data-action="resize-left"></div>
                 <div class="gantt-resize-handle gantt-resize-handle-right" data-action="resize-right"></div>
                 <div class="gantt-dependency-connector" data-action="connect-dependency" title="ドラッグして他のタスクの左端に繋ぐ">＋</div>
@@ -1396,7 +1397,17 @@ function renderProgressLine() {
         const centerY = top + (height / 2);
         const progress = parseInt(t.progress) || 0;
         
-        const progX = left + (width * (progress / 100));
+        const startM = moment(t.start_date).startOf('day');
+        const todayM = moment().startOf('day');
+        
+        // 進捗ポイント(progX)の決定ロジック：
+        // 1. 進捗100%（完了）の場合は、期日が過去にあっても遅延なし（本日線に固定）
+        // 2. 開始日が本日より未来にあるタスクは、予定通り開始前なので遅延なし（本日線に固定）
+        // 3. 上記以外（今日より過去に開始日がある未完了タスク）は、進捗率に応じた位置にする
+        let progX = left + (width * (progress / 100));
+        if (progress === 100 || startM.isAfter(todayM)) {
+            progX = todayX;
+        }
         
         tasksData.push({
             id: taskId,
@@ -1417,61 +1428,63 @@ function renderProgressLine() {
 
         const sortedYKeys = Object.keys(yGroups).map(Number).sort((a, b) => a - b);
         
-        // 直線を引くヘルパー関数
-        const drawLine = (x1, y1, x2, y2, color, isDash) => {
-            const line = document.createElementNS(svgNS, 'line');
-            line.setAttribute('x1', x1);
-            line.setAttribute('y1', y1);
-            line.setAttribute('x2', x2);
-            line.setAttribute('y2', y2);
-            line.setAttribute('stroke', color);
-            line.setAttribute('stroke-width', '2');
-            if (isDash) {
-                line.setAttribute('stroke-dasharray', '5 5');
-            }
-            svg.appendChild(line);
-        };
-        
-        let prevY = 0;
+        let prevPoint = { x: todayX, y: 0 };
         
         sortedYKeys.forEach((yKey, index) => {
             const group = yGroups[yKey];
             const minProgX = Math.min(...group.map(t => t.progX));
             const y = yKey;
             
-            // 遅延量（日数）の計算
-            const diffX = Math.abs(todayX - minProgX);
-            const diffDays = diffX / ganttConfig.dayWidth;
+            const p = { x: minProgX, y: y };
             
-            // 日数に応じてアルファ値（濃さ）を計算。最大14日で上限1.0、下限は0.3
-            let alpha = 0.3 + (diffDays / 14) * 0.7;
-            if (alpha > 1.0) alpha = 1.0;
+            // prevPoint から p へのなだらかな3次ベジェ曲線を描く
+            const cy1 = prevPoint.y + (p.y - prevPoint.y) / 3;
+            const cy2 = prevPoint.y + (p.y - prevPoint.y) * 2 / 3;
             
-            // 色の決定 (遅延=赤、順調/正常=青)
-            const color = minProgX < todayX ? `rgba(239, 68, 68, ${alpha})` : `rgba(59, 130, 246, ${alpha})`;
+            // 1. 基準線とイナズマ線に囲まれた領域を半透明で塗りつぶす(Fill Area)
+            const fillPath = document.createElementNS(svgNS, 'path');
+            const fillData = `M ${todayX} ${prevPoint.y} L ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${p.x} ${cy2}, ${p.x} ${p.y} L ${todayX} ${p.y} Z`;
+            fillPath.setAttribute('d', fillData);
             
-            // 7日（1週間）未満の差分なら破線とする
-            const isDash = diffDays < 7;
+            // 遅延はほんのり赤い半透明(15%)、順調はほんのり青い半透明(15%)
+            const fillColor = minProgX < todayX ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)';
+            fillPath.setAttribute('fill', fillColor);
+            svg.appendChild(fillPath);
             
-            // 基準線からタスクへの進入線
-            if (index === 0) {
-                drawLine(todayX, 0, minProgX, y, color, isDash);
-            } else {
-                const midY = prevY + (y - prevY) / 2;
-                drawLine(todayX, midY, minProgX, y, color, isDash);
-            }
+            // 2. 境界線(イナズマ線本体)を描画(太さ4.5pxの実線でソリッドカラー)
+            const borderPath = document.createElementNS(svgNS, 'path');
+            const borderData = `M ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${p.x} ${cy2}, ${p.x} ${p.y}`;
+            borderPath.setAttribute('d', borderData);
             
-            // タスクから基準線への退出線
-            if (index === sortedYKeys.length - 1) {
-                drawLine(minProgX, y, todayX, ganttHeight, color, isDash);
-            } else {
-                const nextY = sortedYKeys[index + 1];
-                const nextMidY = y + (nextY - y) / 2;
-                drawLine(minProgX, y, todayX, nextMidY, color, isDash);
-            }
+            const strokeColor = minProgX < todayX ? '#ef4444' : '#3b82f6';
+            borderPath.setAttribute('stroke', strokeColor);
+            borderPath.setAttribute('stroke-width', '4.5');
+            borderPath.setAttribute('fill', 'none');
+            svg.appendChild(borderPath);
             
-            prevY = y;
+            prevPoint = p;
         });
+        
+        // 最後のタスクから最下部への退出線
+        const lastY = ganttHeight;
+        const cy1 = prevPoint.y + (lastY - prevPoint.y) / 3;
+        const cy2 = prevPoint.y + (lastY - prevPoint.y) * 2 / 3;
+        
+        // 退出線の塗りつぶし（基本は順調＝青半透明）
+        const fillPath = document.createElementNS(svgNS, 'path');
+        const fillData = `M ${todayX} ${prevPoint.y} L ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${todayX} ${cy2}, ${todayX} ${lastY} Z`;
+        fillPath.setAttribute('d', fillData);
+        fillPath.setAttribute('fill', 'rgba(59, 130, 246, 0.15)');
+        svg.appendChild(fillPath);
+
+        const path = document.createElementNS(svgNS, 'path');
+        const pathData = `M ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${todayX} ${cy2}, ${todayX} ${lastY}`;
+        path.setAttribute('d', pathData);
+        
+        path.setAttribute('stroke', '#3b82f6'); // 退出線は基準線と同色（100%不透明）
+        path.setAttribute('stroke-width', '4.5');
+        path.setAttribute('fill', 'none');
+        svg.appendChild(path);
     }
 
     container.appendChild(svg);

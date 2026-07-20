@@ -1,6 +1,6 @@
-section_id,section_name,color
-S_001,2D,#FF6B6B
-S_003,3D_Char,#FFD43B
-S_002,Motion,#4DABF7
-S_004,Effect,#BA55D3
-S_005,BG,#20B2AA
+section_id,section_name,color,text_color
+S_001,2D,#FF6B6B,#000000
+S_003,3D_Char,#FFD43B,#000000
+S_002,Motion,#4DABF7,#000000
+S_004,Effect,#BA55D3,#000000
+S_005,BG,#20B2AA,#000000

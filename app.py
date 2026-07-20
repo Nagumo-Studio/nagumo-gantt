@@ -239,7 +239,7 @@ def save_masters():
         master_files = {
             'release': ('m_release.csv', ['release_id', 'release_name', 'art_deadline', 'branch_deadline', 'release_date', 'event_name']),
             'character': ('m_character.csv', ['char_id', 'char_name', 'costume_name', 'category', 'usage', 'event_id']),
-            'section': ('m_section.csv', ['section_id', 'section_name', 'color']),
+            'section': ('m_section.csv', ['section_id', 'section_name', 'color', 'text_color']),
             'member': ('m_member.csv', ['member_id', 'member_name', 'display_name', 'section_id', 'bg_color', 'text_color']),
             'status': ('m_status.csv', ['status_id', 'status_name', 'color']),
             'task_template': ('m_task_template.csv', ['template_id', 'section_id', 'task_name', 'default_days']),
