@@ -260,17 +260,22 @@
         </div>
         
         <!-- AI Chat Panel -->
-        <div id="ai-chat-panel" class="w-[400px] bg-gray-50 border-l shadow-xl flex flex-col transform translate-x-full transition-transform duration-300 absolute right-0 top-0 h-full z-50">
-            <div class="p-3 bg-blue-800 text-white border-b flex justify-between items-center relative">
-                <div class="flex items-center space-x-2">
-                    <button id="btn-back-to-sessions" class="hidden mr-1 text-gray-300 hover:text-white font-bold text-lg" title="一覧に戻る">⇐</button>
-                    <span class="text-xl">🤖</span>
-                    <h2 class="font-bold" id="ai-panel-title">AIセッション</h2>
+        <div id="ai-chat-panel" class="w-[400px] bg-gray-50 border-l shadow-xl flex flex-col transform translate-x-full transition-transform duration-300 absolute right-0 top-0 h-full z-50" style="min-width: 300px;">
+            <!-- リサイズハンドル -->
+            <div id="ai-chat-resize-handle" class="absolute top-0 left-0 w-2 h-full cursor-ew-resize hover:bg-blue-400/50 transition-colors z-[10000]"></div>
+            <div class="p-3 bg-blue-800 text-white border-b flex flex-col relative">
+                <div class="flex justify-between items-center w-full">
+                    <div class="flex items-center space-x-2">
+                        <button id="btn-back-to-sessions" class="hidden mr-1 text-gray-300 hover:text-white font-bold text-lg" title="一覧に戻る">⇐</button>
+                        <span class="text-xl">🤖</span>
+                        <h2 class="font-bold" id="ai-panel-title">AIセッション</h2>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <button id="btn-ai-settings" class="text-gray-300 hover:text-white" title="設定">⚙️</button>
+                        <button id="btn-close-ai-chat" class="text-gray-300 hover:text-white text-xl">&times;</button>
+                    </div>
                 </div>
-                <div class="flex items-center space-x-3">
-                    <button id="btn-ai-settings" class="text-gray-300 hover:text-white" title="設定">⚙️</button>
-                    <button id="btn-close-ai-chat" class="text-gray-300 hover:text-white text-xl">&times;</button>
-                </div>
+                <div id="ai-panel-period" class="text-[10px] text-blue-200 mt-1 ml-7 hidden"></div>
             </div>
             
             <!-- View 1: セッション一覧画面 -->
@@ -372,6 +377,10 @@
                         <label class="block font-bold mb-1">Temperature (温度)</label>
                         <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="0.7" class="w-full">
                         <div class="text-center text-sm text-gray-600"><span id="ai-temp-val">0.7</span></div>
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">エラー自己修復の最大試行回数 (AI Loop)</label>
+                        <input type="number" id="ai-max-retries" min="0" max="10" value="3" class="w-full border rounded p-2 text-sm">
                     </div>
                     <div>
                         <label class="block font-bold mb-1">System Prompt</label>
