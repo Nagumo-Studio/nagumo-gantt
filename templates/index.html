@@ -49,17 +49,15 @@
         </div>
     </header>
 
+    <!-- Project Tabs Container -->
+    <div class="bg-blue-800 border-b flex items-end space-x-1 px-3 pt-2 select-none z-30" id="project-tabs-container">
+        <!-- Tabs injected by JS -->
+    </div>
+
     <!-- Tab & Control Bar (Tabs and Filters integrated) -->
     <div class="bg-gray-200 border-b flex items-center justify-between px-3 py-1.5 select-none z-30" id="tabs-control-bar">
         <!-- 左側：タブ + 検索フィルター群（仕切りあり） -->
         <div class="flex items-center space-x-3">
-            <!-- タブ -->
-            <div class="flex items-end space-x-1" id="project-tabs-container">
-                <!-- Tabs injected by JS -->
-            </div>
-            
-            <div class="h-6 w-px bg-gray-400 mx-2"></div> <!-- 区切り線 -->
-            
             <!-- 検索 & フィルター -->
             <div class="flex items-center space-x-3 text-xs">
                 <!-- 検索 -->
@@ -101,29 +99,25 @@
                         </div>
                     </div>
                 </div>
-            <div class="h-6 w-px bg-gray-400 mx-2"></div> <!-- 仕切り -->
 
-            <!-- イナズマ線 -->
-            <div class="flex items-center bg-white px-2 py-1 rounded border shadow-sm text-xs">
-                <input type="checkbox" id="toggle-progress-line" class="mr-1 w-3.5 h-3.5 rounded cursor-pointer">
-                <label for="toggle-progress-line" class="text-xs text-gray-700 cursor-pointer flex items-center font-semibold">⚡イナズマ線</label>
-            </div>
+                <!-- イナズマ線 -->
+                <div class="flex items-center bg-white px-2 py-1 rounded border shadow-sm text-xs">
+                    <input type="checkbox" id="toggle-progress-line" class="mr-1 w-3.5 h-3.5 rounded cursor-pointer">
+                    <label for="toggle-progress-line" class="text-xs text-gray-700 cursor-pointer flex items-center font-semibold">⚡イナズマ線</label>
+                </div>
 
-            <div class="h-6 w-px bg-gray-400 mx-2"></div> <!-- 仕切り -->
-
-            <!-- 取り消し・やり直し（矢印アイコン化） -->
-            <div class="flex items-center space-x-1 text-xs">
-                <button id="btn-undo" class="bg-gray-500 hover:bg-gray-600 disabled:opacity-30 disabled:hover:bg-gray-500 text-white w-7 h-7 rounded flex items-center justify-center transition shadow-sm" disabled title="取り消し (Ctrl+Z)">
-                    <span class="text-sm font-bold">↶</span>
-                </button>
-                <button id="btn-redo" class="bg-gray-500 hover:bg-gray-600 disabled:opacity-30 disabled:hover:bg-gray-500 text-white w-7 h-7 rounded flex items-center justify-center transition shadow-sm" disabled title="やり直し (Ctrl+Y)">
-                    <span class="text-sm font-bold">↷</span>
-                </button>
-            </div>
+                <!-- 取り消し・やり直し（矢印アイコン化） -->
+                <div class="flex items-center space-x-1 text-xs">
+                    <button id="btn-undo" class="bg-gray-500 hover:bg-gray-600 disabled:opacity-30 disabled:hover:bg-gray-500 text-white w-7 h-7 rounded flex items-center justify-center transition shadow-sm" disabled title="取り消し (Ctrl+Z)">
+                        <span class="text-sm font-bold">↶</span>
+                    </button>
+                    <button id="btn-redo" class="bg-gray-500 hover:bg-gray-600 disabled:opacity-30 disabled:hover:bg-gray-500 text-white w-7 h-7 rounded flex items-center justify-center transition shadow-sm" disabled title="やり直し (Ctrl+Y)">
+                        <span class="text-sm font-bold">↷</span>
+                    </button>
+                </div>
             </div>
         </div>
 
-        
         <!-- 右側：保存のみ（仕切りなし） -->
         <div class="flex items-center space-x-2 text-xs">
             <!-- 保存ボタン & 未保存バッジ -->
@@ -364,7 +358,7 @@
                     <div>
                         <label class="block font-bold mb-1">APIキー</label>
                         <input type="password" id="ai-api-key" class="w-full border rounded p-2" placeholder="sk-...">
-                        <p class="text-xs text-gray-500 mt-1">※ブラウザのLocalStorageに保存されます。</p>
+                        <p class="text-xs text-gray-500 mt-1">※ブラウザ of LocalStorageに保存されます。</p>
                     </div>
                     <div class="flex space-x-2 items-end">
                         <div class="flex-1">

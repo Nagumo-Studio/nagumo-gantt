@@ -226,6 +226,43 @@ async function fetchProjects() {
     }
 }
 
+let draggedProject = null;
+
+function handleTabDragStart(e, p) {
+    draggedProject = p;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', p);
+    e.currentTarget.style.opacity = '0.5';
+}
+
+function handleTabDragOver(e) {
+    if (e.preventDefault) {
+        e.preventDefault();
+    }
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+}
+
+function handleTabDragEnd(e) {
+    e.currentTarget.style.opacity = '1';
+    draggedProject = null;
+}
+
+function handleTabDrop(e, targetP) {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    if (draggedProject && draggedProject !== targetP) {
+        const fromIndex = openProjects.indexOf(draggedProject);
+        const toIndex = openProjects.indexOf(targetP);
+        if (fromIndex !== -1 && toIndex !== -1) {
+            openProjects.splice(fromIndex, 1);
+            openProjects.splice(toIndex, 0, draggedProject);
+            renderTabs();
+        }
+    }
+}
+
 function renderTabs() {
     const container = document.getElementById('project-tabs-container');
     if (!container) return;
@@ -239,10 +276,17 @@ function renderTabs() {
         
         html += `
             <div class="px-4 py-2 rounded-t flex items-center group transition-colors ${activeClasses}"
+                 draggable="true"
+                 ondragstart="handleTabDragStart(event, '${p}')"
+                 ondragover="handleTabDragOver(event)"
+                 ondragend="handleTabDragEnd(event)"
+                 ondrop="handleTabDrop(event, '${p}')"
                  onclick="switchProjectTab('${p}')">
                 <span>${p}</span>
-                <span class="ml-2 text-gray-500 hover:text-red-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity"
-                      onclick="closeProjectTab(event, '${p}')">&times;</span>
+                <span class="ml-2 text-gray-400 hover:text-red-500 font-bold hover:scale-125 transition-transform"
+                      onclick="closeProjectTab(event, '${p}')"
+                      title="タブを閉じる/削除"
+                      style="cursor: pointer; font-size: 1.1rem; line-height: 1;">&times;</span>
             </div>
         `;
     });
@@ -270,9 +314,51 @@ async function switchProjectTab(p) {
     if (meLink) meLink.href = `/master_editor?project=${currentProject}`;
 }
 
-function closeProjectTab(e, p) {
+async function closeProjectTab(e, p) {
     e.stopPropagation();
+    
+    const choice = confirm(
+        `「${p}」タブの操作を選択してください。\n\n` +
+        `・[OK] を押すと、このタブを閉じます（データはサーバーに残ります）。\n` +
+        `・キャンセルを押すと、何もしません。\n\n` +
+        `※プロジェクトデータ自体をサーバーから完全に削除したい場合は、この後表示されるダイアログで「削除する」を選択してください。`
+    );
+    
+    if (!choice) {
+        return;
+    }
+    
     if (p === currentProject && hasUnsavedChanges && !confirm('未保存の変更がありますが、タブを閉じますか？')) return;
+    
+    let fullyDelete = false;
+    if (p !== 'Sample') {
+        fullyDelete = confirm(
+            `【プロジェクトの完全削除】\n` +
+            `本当にプロジェクト「${p}」のデータ（CSVファイル等）をサーバーから完全に削除しますか？\n` +
+            `この操作は取り消せません！`
+        );
+    }
+    
+    if (fullyDelete) {
+        try {
+            const res = await fetch('/api/projects/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project: p })
+            });
+            const ret = await res.json();
+            if (ret.status === 'success') {
+                alert(`プロジェクト「${p}」をサーバーから完全に削除しました。`);
+                availableProjects = availableProjects.filter(x => x !== p);
+            } else {
+                alert(`削除に失敗しました: ${ret.message}`);
+                return;
+            }
+        } catch (err) {
+            alert(`エラーが発生しました: ${err}`);
+            return;
+        }
+    }
     
     openProjects = openProjects.filter(x => x !== p);
     
@@ -859,14 +945,33 @@ function buildGroupsList() {
             
             for (let i = 1; i <= requiredLanes; i++) {
                 const laneId = `${charId}_LANE${i}`;
+                // このレーンにタスクがあるかどうかを確認
+                const hasTask = sortedCharTasks.some(t => {
+                    const mappedLaneIdx = char.laneMapping[parseInt(t.lane) || 1] || 1;
+                    return mappedLaneIdx === i;
+                });
+
                 ganttConfig.groups.push({
-                    id: laneId, type: 'lane', name: `Lane ${i}`, parentId: charId, level: 2
+                    id: laneId, 
+                    type: 'lane', 
+                    name: `Lane ${i}`, 
+                    parentId: charId, 
+                    level: 2,
+                    isEmpty: !hasTask // 空の行かどうかをマーク
                 });
             }
         });
     });
     
-    const totalHeight = ganttConfig.groups.length * ganttConfig.rowHeight;
+    // 全体の高さを計算（空の行は高さを半分にする）
+    let currentTop = 0;
+    ganttConfig.groups.forEach(g => {
+        g.top = currentTop;
+        g.height = g.isEmpty ? ganttConfig.rowHeight / 2 : ganttConfig.rowHeight;
+        currentTop += g.height;
+    });
+
+    const totalHeight = currentTop;
     // グループが全くない（タスクがない）場合でも背景グリッドが消えないよう、コンテナの高さ以上を確保する
     const containerHeight = els.ganttBody.clientHeight;
     els.ganttBodyContent.style.minHeight = `${Math.max(totalHeight, containerHeight)}px`;
@@ -1021,8 +1126,9 @@ function renderHeaderAndGrid(totalWidth) {
 function renderRows() {
     let html = '';
     ganttConfig.groups.forEach((g, idx) => {
-        const top = idx * ganttConfig.rowHeight;
-        html += `<div class="gantt-timeline-row" data-group="${g.id}" style="top:${top}px; height:${ganttConfig.rowHeight}px;"></div>`;
+        const top = g.top;
+        const height = g.height;
+        html += `<div class="gantt-timeline-row" data-group="${g.id}" style="top:${top}px; height:${height}px;"></div>`;
     });
     els.ganttRows.innerHTML = html;
 }
@@ -1043,8 +1149,8 @@ function toggleGroup(id) {
 function renderTasks() {
     let html = '';
     const groupY = {};
-    ganttConfig.groups.forEach((g, idx) => {
-        groupY[g.id] = idx * ganttConfig.rowHeight;
+    ganttConfig.groups.forEach((g) => {
+        groupY[g.id] = g.top;
     });
 
     const taskHeight = 24 * ganttConfig.uiScale;
@@ -1099,7 +1205,10 @@ function renderTasks() {
         const statusName = status ? status.status_name : '未着手';
         const progress = parseInt(t.progress) || 0;
         
-        const taskTop = y + (level * (taskHeight + margin)) + (ganttConfig.rowHeight - taskHeight) / 2;
+        const currentGroup = ganttConfig.groups.find(g => g.id === parentId);
+        const rowHeight = currentGroup ? currentGroup.height : ganttConfig.rowHeight;
+
+        const taskTop = y + (level * (taskHeight + margin)) + (rowHeight - taskHeight) / 2;
         const completedClass = progress === 100 ? 'completed' : '';
         const selectedClass = (selectedTaskIds.has(t.task_id) || (typeof currentTaskContextId !== 'undefined' && currentTaskContextId === t.task_id)) ? 'selected' : '';
         
@@ -1165,8 +1274,9 @@ function renderTasks() {
         const x = dateToX(startM);
         const width = dateToX(endM) - x;
         const y = groupY[g.id];
+        const rowHeight = g.height;
         
-        const taskTop = y + (ganttConfig.rowHeight - taskHeight) / 2;
+        const taskTop = y + (rowHeight - taskHeight) / 2;
         const isCollapsed = Array.from(ganttConfig.collapsedGroups).some(id => String(id).trim() === String(g.id).trim());
         const icon = isCollapsed ? '▶' : '▼';
         
@@ -1199,11 +1309,12 @@ function renderTasks() {
         const activeSectionIds = new Set(charTasks.map(t => t.section_id));
 
         // 対象キャラクターグループの表示領域（Y座標と高さ）を計算
-        // Laneは3つある想定
         const charY = groupY[g.id];
         const lanes = ganttConfig.groups.filter(child => child.type === 'lane' && child.parentId === g.id);
         if (lanes.length === 0) return;
-        const groupHeight = (lanes.length + 1) * ganttConfig.rowHeight; // キャラバー + レーン
+        const charRowHeight = g.height;
+        const totalLanesHeight = lanes.reduce((sum, l) => sum + l.height, 0);
+        const groupHeight = charRowHeight + totalLanesHeight; // キャラバー + 全レーンの高さ
         
         // 縦線とマーカーの配置状態（重なり回避用）
         const markerPositions = {}; // key: date string, value: count
@@ -1229,12 +1340,12 @@ function renderTasks() {
             // 縦線 (レーン部分を貫く)
             html += `
                 <div class="absolute gantt-deadline-line" data-section-id="${sec.section_id}" data-date="${dateStr}"
-                     style="left:${x}px; top:${charY + ganttConfig.rowHeight}px; width:4px; height:${groupHeight - ganttConfig.rowHeight}px; background-color:${color}; opacity: 0.6; z-index: 10;"></div>
+                     style="left:${x}px; top:${charY + charRowHeight}px; width:4px; height:${totalLanesHeight}px; background-color:${color}; opacity: 0.6; z-index: 10;"></div>
             `;
             
             // ▼マーカー（ドラッグ可能）
             // キャラクターバーの真下の行（Lane 1）の上部に配置。スタッガーして重なりを回避
-            const markerTop = charY + ganttConfig.rowHeight + (staggerLevel * 14 * ganttConfig.uiScale);
+            const markerTop = charY + charRowHeight + (staggerLevel * 14 * ganttConfig.uiScale);
             
             html += `
                 <div class="absolute gantt-deadline-marker cursor-pointer flex flex-col items-center justify-center select-none"
@@ -1400,10 +1511,6 @@ function renderProgressLine() {
         const startM = moment(t.start_date).startOf('day');
         const todayM = moment().startOf('day');
         
-        // 進捗ポイント(progX)の決定ロジック：
-        // 1. 進捗100%（完了）の場合は、期日が過去にあっても遅延なし（本日線に固定）
-        // 2. 開始日が本日より未来にあるタスクは、予定通り開始前なので遅延なし（本日線に固定）
-        // 3. 上記以外（今日より過去に開始日がある未完了タスク）は、進捗率に応じた位置にする
         let progX = left + (width * (progress / 100));
         if (progress === 100 || startM.isAfter(todayM)) {
             progX = todayX;
@@ -1437,51 +1544,76 @@ function renderProgressLine() {
             
             const p = { x: minProgX, y: y };
             
-            // prevPoint から p へのなだらかな3次ベジェ曲線を描く
-            const cy1 = prevPoint.y + (p.y - prevPoint.y) / 3;
-            const cy2 = prevPoint.y + (p.y - prevPoint.y) * 2 / 3;
-            
-            // 1. 基準線とイナズマ線に囲まれた領域を半透明で塗りつぶす(Fill Area)
-            const fillPath = document.createElementNS(svgNS, 'path');
-            const fillData = `M ${todayX} ${prevPoint.y} L ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${p.x} ${cy2}, ${p.x} ${p.y} L ${todayX} ${p.y} Z`;
-            fillPath.setAttribute('d', fillData);
-            
-            // 遅延はほんのり赤い半透明(15%)、順調はほんのり青い半透明(15%)
-            const fillColor = minProgX < todayX ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)';
-            fillPath.setAttribute('fill', fillColor);
-            svg.appendChild(fillPath);
-            
-            // 2. 境界線(イナズマ線本体)を描画(太さ4.5pxの実線でソリッドカラー)
-            const borderPath = document.createElementNS(svgNS, 'path');
-            const borderData = `M ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${p.x} ${cy2}, ${p.x} ${p.y}`;
-            borderPath.setAttribute('d', borderData);
-            
-            const strokeColor = minProgX < todayX ? '#ef4444' : '#3b82f6';
-            borderPath.setAttribute('stroke', strokeColor);
-            borderPath.setAttribute('stroke-width', '4.5');
-            borderPath.setAttribute('fill', 'none');
-            svg.appendChild(borderPath);
+            // prevPoint から p への区間の中間点（Y座標）
+            const midY = prevPoint.y + (p.y - prevPoint.y) / 2;
+            const midX = prevPoint.x + (p.x - prevPoint.x) / 2;
+            const cpOffset = Math.min(Math.abs(p.y - prevPoint.y) / 2, 40);
+
+            // 前半: prevPoint -> (midX, midY)
+            const c1_x1 = prevPoint.x;
+            const c1_y1 = prevPoint.y + cpOffset / 2;
+            const c1_x2 = midX;
+            const c1_y2 = midY - cpOffset / 2;
+
+            const fillPath1 = document.createElementNS(svgNS, 'path');
+            const fillData1 = `M ${todayX} ${prevPoint.y} L ${prevPoint.x} ${prevPoint.y} C ${c1_x1} ${c1_y1}, ${c1_x2} ${c1_y2}, ${midX} ${midY} L ${todayX} ${midY} Z`;
+            fillPath1.setAttribute('d', fillData1);
+            const fillColor1 = prevPoint.x < todayX ? 'rgba(239, 68, 68, 0.3)' : 'rgba(59, 130, 246, 0.3)';
+            fillPath1.setAttribute('fill', fillColor1);
+            svg.appendChild(fillPath1);
+
+            const borderPath1 = document.createElementNS(svgNS, 'path');
+            const borderData1 = `M ${prevPoint.x} ${prevPoint.y} C ${c1_x1} ${c1_y1}, ${c1_x2} ${c1_y2}, ${midX} ${midY}`;
+            borderPath1.setAttribute('d', borderData1);
+            const strokeColor1 = prevPoint.x < todayX ? '#ef4444' : '#3b82f6';
+            borderPath1.setAttribute('stroke', strokeColor1);
+            borderPath1.setAttribute('stroke-width', '4.5');
+            borderPath1.setAttribute('fill', 'none');
+            svg.appendChild(borderPath1);
+
+            // 後半: (midX, midY) -> p
+            const c2_x1 = midX;
+            const c2_y1 = midY + cpOffset / 2;
+            const c2_x2 = p.x;
+            const c2_y2 = p.y - cpOffset / 2;
+
+            const fillPath2 = document.createElementNS(svgNS, 'path');
+            const fillData2 = `M ${todayX} ${midY} L ${midX} ${midY} C ${c2_x1} ${c2_y1}, ${c2_x2} ${c2_y2}, ${p.x} ${p.y} L ${todayX} ${p.y} Z`;
+            fillPath2.setAttribute('d', fillData2);
+            const fillColor2 = p.x < todayX ? 'rgba(239, 68, 68, 0.3)' : 'rgba(59, 130, 246, 0.3)';
+            fillPath2.setAttribute('fill', fillColor2);
+            svg.appendChild(fillPath2);
+
+            const borderPath2 = document.createElementNS(svgNS, 'path');
+            const borderData2 = `M ${midX} ${midY} C ${c2_x1} ${c2_y1}, ${c2_x2} ${c2_y2}, ${p.x} ${p.y}`;
+            borderPath2.setAttribute('d', borderData2);
+            const strokeColor2 = p.x < todayX ? '#ef4444' : '#3b82f6';
+            borderPath2.setAttribute('stroke', strokeColor2);
+            borderPath2.setAttribute('stroke-width', '4.5');
+            borderPath2.setAttribute('fill', 'none');
+            svg.appendChild(borderPath2);
             
             prevPoint = p;
         });
-        
-        // 最後のタスクから最下部への退出線
+
+        // 退出線の色も調整（最後のポイントの状態を引き継ぐ）
         const lastY = ganttHeight;
         const cy1 = prevPoint.y + (lastY - prevPoint.y) / 3;
         const cy2 = prevPoint.y + (lastY - prevPoint.y) * 2 / 3;
         
-        // 退出線の塗りつぶし（基本は順調＝青半透明）
+        const exitColor = prevPoint.x < todayX ? 'rgba(239, 68, 68, 0.3)' : 'rgba(59, 130, 246, 0.3)';
+        const exitStrokeColor = prevPoint.x < todayX ? '#ef4444' : '#3b82f6';
+
         const fillPath = document.createElementNS(svgNS, 'path');
         const fillData = `M ${todayX} ${prevPoint.y} L ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${todayX} ${cy2}, ${todayX} ${lastY} Z`;
         fillPath.setAttribute('d', fillData);
-        fillPath.setAttribute('fill', 'rgba(59, 130, 246, 0.15)');
+        fillPath.setAttribute('fill', exitColor);
         svg.appendChild(fillPath);
 
         const path = document.createElementNS(svgNS, 'path');
         const pathData = `M ${prevPoint.x} ${prevPoint.y} C ${prevPoint.x} ${cy1}, ${todayX} ${cy2}, ${todayX} ${lastY}`;
         path.setAttribute('d', pathData);
-        
-        path.setAttribute('stroke', '#3b82f6'); // 退出線は基準線と同色（100%不透明）
+        path.setAttribute('stroke', exitStrokeColor);
         path.setAttribute('stroke-width', '4.5');
         path.setAttribute('fill', 'none');
         svg.appendChild(path);
@@ -1901,6 +2033,26 @@ function setupMouseTracking() {
         
         if (dragState.mode === 'move') {
             const movingIds = new Set(dragState.selectedTasks.map(st => st.id));
+            
+            // ドラッグ中のマウス位置から現在の行（グループ）を特定する
+            const rect = els.ganttBodyContent.getBoundingClientRect();
+            const mouseY = e.clientY - rect.top;
+            const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight); // これは固定の rowHeight で計算するとずれる可能性があるが一旦
+            
+            // 正確な行判定（動的な高さに対応）
+            let currentHoveredGroup = null;
+            for (let i = 0; i < ganttConfig.groups.length; i++) {
+                const g = ganttConfig.groups[i];
+                if (mouseY >= g.top && mouseY < g.top + g.height) {
+                    currentHoveredGroup = g;
+                    break;
+                }
+            }
+
+            // もし空の行（高さ半分）の上にドラッグしてきたら、その行を一時的に広げるか、
+            // あるいは renderGantt を呼び出して再計算する。
+            // ここではシンプルに、ドラッグ中は対象の行が空であっても rowHeight 分のスペースがあるものとして扱う。
+
             dragState.selectedTasks.forEach(st => {
                 const rawLeft = st.initialLeft + dx;
                 const rawTop = st.initialTop + dy;

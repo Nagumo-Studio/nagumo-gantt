@@ -148,6 +148,24 @@ def get_projects():
         projects = ['Sample']
     return jsonify(projects)
 
+@app.route('/api/projects/delete', methods=['POST'])
+def delete_project():
+    try:
+        import shutil
+        project_name = request.json.get('project')
+        if not project_name:
+            return jsonify({'status': 'error', 'message': 'Project name is required'}), 400
+        if project_name == 'Sample':
+            return jsonify({'status': 'error', 'message': 'Sampleプロジェクトは削除できません'}), 400
+        p_dir = get_project_dir(project_name)
+        if os.path.exists(p_dir):
+            shutil.rmtree(p_dir)
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Project not found'}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/masters', methods=['GET'])
 def get_masters():
     project_name = request.args.get('project', 'Sample')
