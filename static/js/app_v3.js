@@ -766,7 +766,8 @@ function xToDate(x) {
 
 function getMasterItem(type, idField, id) {
     if (!masters[type]) return null;
-    return masters[type].find(m => m[idField] === id);
+    const res = masters[type].find(m => String(m[idField]).trim() === String(id).trim());
+    return res;
 }
 
 // --- Rendering ---
@@ -975,7 +976,7 @@ function buildGroupsList() {
     const totalHeight = currentTop;
     // グループが全くない（タスクがない）場合でも背景グリッドが消えないよう、コンテナの高さ以上を確保する
     const containerHeight = els.ganttBody.clientHeight;
-    els.ganttBodyContent.style.minHeight = `${Math.max(totalHeight, containerHeight)}px`;
+    els.ganttBodyContent.style.minHeight = `${Math.max(totalHeight, containerHeight) + 500}px`;
 }
 
 function renderHeaderAndGrid(totalWidth) {
@@ -1199,8 +1200,27 @@ function renderTasks() {
         const member = getMasterItem('member', 'member_id', t.member_id);
         const bgColor = section ? section.color : '#3b82f6';
         const textColor = section && section.text_color ? section.text_color : '#000000'; // セクションごとのテキスト色を取得
-        const memberBg = member ? member.bg_color : '#9ca3af';
-        const memberText = member ? member.text_color : '#ffffff';
+        const memberBg = (member && member.bg_color && member.bg_color.trim()) ? member.bg_color.trim() : '#9ca3af';
+        // text_color が取得できない、または空の場合は、bg_color に基づいて白か黒を自動判定する
+        let rawMemberText = (member && member.text_color) ? String(member.text_color).trim() : '';
+        // 8桁(RGBA)や不正な形式を考慮し、#から始まる6桁、または名前付き色以外はフォールバックさせる
+        let memberText = '';
+        if (rawMemberText.match(/^#[0-9A-Fa-f]{6}$/) || rawMemberText.match(/^[a-z]+$/i)) {
+            memberText = rawMemberText;
+        } else if (rawMemberText.match(/^#[0-9A-Fa-f]{8}$/)) {
+            // RGBAの場合は最初の6桁（RGB）のみ抽出
+            memberText = rawMemberText.substring(0, 7);
+        }
+
+        if (!memberText) {
+            // 背景色の輝度を計算 (簡易式: 0.299R + 0.587G + 0.114B)
+            const hex = memberBg.replace('#', '');
+            const r = parseInt(hex.substr(0, 2), 16);
+            const g = parseInt(hex.substr(2, 2), 16);
+            const b = parseInt(hex.substr(4, 2), 16);
+            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            memberText = luminance > 0.5 ? '#000000' : '#ffffff';
+        }
         const memberName = member ? (member.display_name || member.member_name) : '未定';
         const status = getMasterItem('status', 'status_id', t.status_id);
         const statusColor = status ? status.color : '#9ca3af';
@@ -1219,7 +1239,9 @@ function renderTasks() {
                 <div class="gantt-task-bg" style="background-color:${bgColor};"></div>
                 <div class="gantt-task-progress" style="width:${progress}%; background-color:${bgColor};"></div>
                 <div class="gantt-status-bar absolute top-0 left-0 w-full z-10" style="height: 4px; background-color:${statusColor}; border-radius: 2px 2px 0 0;"></div>
-                <div class="gantt-member-badge" style="background-color:${memberBg}; color:${memberText};">${memberName}</div>
+                <div class="gantt-member-badge" style="background-color:${memberBg} !important; border: 1px solid ${memberText} !important;">
+                    <span style="color:${memberText} !important; -webkit-text-fill-color: ${memberText} !important; display: inline-block;">${memberName}</span>
+                </div>
                 <div class="gantt-task-name" style="color: ${textColor};">${t.task_name}</div>
                 <div class="gantt-resize-handle gantt-resize-handle-left" data-action="resize-left"></div>
                 <div class="gantt-resize-handle gantt-resize-handle-right" data-action="resize-right"></div>
@@ -2227,15 +2249,24 @@ function setupMouseTracking() {
             dragState.element.style.top = `${rawTop}px`;
             
             const centerTop = rawTop + (24 * ganttConfig.uiScale) / 2;
-            const rowIndex = Math.floor(centerTop / ganttConfig.rowHeight);
-            
-            if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-                const hoverGroup = ganttConfig.groups[rowIndex];
-                if (hoverGroup) {
-                    dragState.guide.style.top = `${rowIndex * ganttConfig.rowHeight}px`;
-                    dragState.guide.classList.remove('hidden');
-                    dragState.targetRowIndex = rowIndex;
+            let hoverGroupIdx = -1;
+            for (let i = 0; i < ganttConfig.groups.length; i++) {
+                const g = ganttConfig.groups[i];
+                if (centerTop >= g.top && centerTop < g.top + g.height) {
+                    hoverGroupIdx = i;
+                    break;
                 }
+            }
+
+            if (hoverGroupIdx !== -1) {
+                const hoverGroup = ganttConfig.groups[hoverGroupIdx];
+                dragState.guide.style.top = `${hoverGroup.top}px`;
+                dragState.guide.style.height = `${hoverGroup.height}px`;
+                dragState.guide.classList.remove('hidden');
+                dragState.targetRowIndex = hoverGroupIdx;
+            } else {
+                dragState.guide.classList.add('hidden');
+                dragState.targetRowIndex = undefined;
             }
         } else if (dragState.mode === 'move-deadline') {
             const rawLeft = dragState.initialLeft + dx;
@@ -2484,9 +2515,16 @@ function setupMouseTracking() {
                     
                     if (dragState.mode === 'move') {
                         const centerTop = finalTop + (24 * ganttConfig.uiScale) / 2;
-                        const rowIndex = Math.floor(centerTop / ganttConfig.rowHeight);
-                        if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-                            const targetGroup = ganttConfig.groups[rowIndex];
+                        let finalHoverIdx = -1;
+                        for (let i = 0; i < ganttConfig.groups.length; i++) {
+                            const g = ganttConfig.groups[i];
+                            if (centerTop >= g.top && centerTop < g.top + g.height) {
+                                finalHoverIdx = i;
+                                break;
+                            }
+                        }
+                        if (finalHoverIdx !== -1) {
+                            const targetGroup = ganttConfig.groups[finalHoverIdx];
                             if (targetGroup.type === 'lane') {
                                 const parts = targetGroup.id.split('_');
                                 if (parts.length >= 4) {

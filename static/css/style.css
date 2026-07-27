@@ -81,26 +81,29 @@ body, html {
     background-color: rgba(224, 224, 224, 0.15); /* 本体背景を極限まで半透明に */
     box-shadow: 0 1px 2px rgba(0,0,0,0.1); /* 影も薄く */
 }
+.gantt-task-item.completed .gantt-member-badge {
+    opacity: 0.5 !important;
+}
+.gantt-task-item.completed .gantt-task-name {
+    opacity: 0.33 !important;
+}
 .gantt-task-item.completed .gantt-task-bg {
     opacity: 0.05; /* 完了タスクのセクション色背景はほぼ透明 */
 }
 .gantt-task-item.completed .gantt-task-progress,
-.gantt-task-item.completed .gantt-member-badge,
-.gantt-task-item.completed .gantt-task-name,
 .gantt-task-item.completed .gantt-dependency-connector {
-    opacity: 0.15; /* 文字や進捗バー、コネクタは15%の薄さに */
+    opacity: 0.15; /* 進捗バー、コネクタは15%の薄さに */
 }
-/* ステータスバー (.gantt-status-bar) は指定がないため 1.0 (不透明) が維持される */
+/* ステータスバー (.gantt-status-bar) や担当者バッジ (.gantt-member-badge) は 1.0 (不透明) が維持される */
 
 /* タスク内の担当者バッジ */
 .gantt-member-badge {
     padding: 0 calc(4px * var(--ui-scale, 1));
-    line-height: calc(12px * var(--ui-scale, 1));
-    height: calc(12px * var(--ui-scale, 1));
-    border-radius: calc(6px * var(--ui-scale, 1));
-    font-size: calc(8.5px * var(--ui-scale, 1));
+    line-height: calc(17px * var(--ui-scale, 1));
+    height: calc(17px * var(--ui-scale, 1));
+    border-radius: calc(8.5px * var(--ui-scale, 1));
+    font-size: calc(11px * var(--ui-scale, 1));
     font-weight: bold;
-    color: #fff;
     white-space: nowrap;
     margin-left: 2px;
     margin-right: calc(4px * var(--ui-scale, 1));
@@ -116,7 +119,6 @@ body, html {
 .gantt-task-name {
     font-size: calc(12px * var(--ui-scale, 1));
     font-weight: bold;
-    color: #fff;
     text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
     white-space: nowrap;
     overflow: hidden;
