@@ -248,12 +248,16 @@
 
                 <div id="editor-field-dates" class="flex space-x-2">
                     <div class="flex-1">
-                        <label class="block font-bold mb-1">開始日</label>
-                        <input type="date" id="edit-start" class="w-full border rounded p-2">
+                        <label class="block font-bold mb-1 text-xs text-gray-500 uppercase tracking-wider">開始日</label>
+                        <input type="date" id="edit-start" class="w-full border rounded p-2 text-sm">
                     </div>
                     <div class="flex-1">
-                        <label class="block font-bold mb-1">終了日</label>
-                        <input type="date" id="edit-end" class="w-full border rounded p-2">
+                        <label class="block font-bold mb-1 text-xs text-gray-500 uppercase tracking-wider">営業日数</label>
+                        <input type="number" id="edit-biz-days" min="1" class="w-full border rounded p-2 text-sm" placeholder="工数">
+                    </div>
+                    <div class="flex-1">
+                        <label class="block font-bold mb-1 text-xs text-gray-500 uppercase tracking-wider">終了日</label>
+                        <input type="date" id="edit-end" class="w-full border rounded p-2 text-sm">
                     </div>
                 </div>
 

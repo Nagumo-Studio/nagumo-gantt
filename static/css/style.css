@@ -153,10 +153,10 @@ body, html {
 .gantt-resize-handle {
     position: absolute;
     top: 0;
-    width: 10px;
+    width: 20px; /* 当たり判定を広げる */
     height: 100%;
     cursor: ew-resize;
-    z-index: 20;
+    z-index: 31; /* コネクタより手前に */
 }
 .gantt-resize-handle-left {
     left: 0;
