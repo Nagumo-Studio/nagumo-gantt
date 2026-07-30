@@ -75,7 +75,10 @@ body, html {
     background-color: #ccc; /* 明度を下げて、より落ち着いた印象に */
 }
 .gantt-task-item.selected {
-    box-shadow: 0 0 0 3px #fbbf24;
+    outline: 3px solid #fbbf24;
+    outline-offset: -1px;
+    z-index: 100 !important;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4);
 }
 .gantt-task-item.completed {
     background-color: rgba(224, 224, 224, 0.15); /* 本体背景を極限まで半透明に */

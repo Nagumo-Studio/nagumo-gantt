@@ -6,33 +6,56 @@
     <title>マスタデータ管理エディタ</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .tab-btn.active { border-bottom: 2px solid #3b82f6; color: #3b82f6; }
+        .tab-btn.active { border-left: 4px solid #3b82f6; background-color: #eff6ff; color: #1d4ed8; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col">
-    <header class="bg-gray-800 text-white p-4 flex justify-between items-center shadow-md">
-        <h1 class="text-xl font-bold">マスタデータ管理エディタ</h1>
+    <header class="bg-slate-800 text-white p-4 flex justify-between items-center shadow-lg z-30">
+        <div class="flex items-center space-x-2">
+            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+            <h1 class="text-xl font-bold tracking-tight">マスタデータ管理エディタ</h1>
+        </div>
         <div class="flex space-x-3 items-center">
             <input type="file" id="csv-upload" accept=".csv" class="hidden" />
-            <button id="btn-import-csv" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded font-bold shadow transition flex items-center">
-                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                CSVインポート
-            </button>
-            <button id="btn-save-masters" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">全マスタ保存</button>
+            <button id="btn-save-masters" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded font-bold shadow-md transition-all active:scale-95">全マスタ保存</button>
         </div>
     </header>
 
     <div class="flex flex-1 overflow-hidden">
-        <div class="w-48 bg-white border-r flex flex-col">
-            <button class="tab-btn active p-4 text-left hover:bg-gray-50 font-bold" data-target="release">リリース</button>
-            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="character">キャラクター</button>
-            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="section">セクション</button>
-            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="member">メンバー</button>
-            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="status">ステータス</button>
-            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="task_template">タスク雛形</button>
-            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="holiday">休日</button>
+        <!-- Sidebar -->
+        <div class="w-52 bg-white border-r border-gray-200 flex flex-col shadow-sm z-20">
+            <div class="p-4 bg-gray-50 border-b border-gray-200 text-xs font-bold text-gray-400 uppercase tracking-widest">マスタ一覧</div>
+            <nav class="flex-1 overflow-y-auto">
+                <button class="tab-btn w-full p-4 text-left hover:bg-gray-50 font-bold transition-all border-l-4 border-transparent flex items-center" data-target="release">
+                    <span class="mr-2">🚀</span> リリース
+                </button>
+                <button class="tab-btn w-full p-4 text-left hover:bg-gray-50 font-bold transition-all border-l-4 border-transparent flex items-center" data-target="character">
+                    <span class="mr-2">👤</span> キャラクター
+                </button>
+                <button class="tab-btn w-full p-4 text-left hover:bg-gray-50 font-bold transition-all border-l-4 border-transparent flex items-center" data-target="section">
+                    <span class="mr-2">🏢</span> セクション
+                </button>
+                <button class="tab-btn w-full p-4 text-left hover:bg-gray-50 font-bold transition-all border-l-4 border-transparent flex items-center" data-target="member">
+                    <span class="mr-2">👥</span> メンバー
+                </button>
+                <button class="tab-btn w-full p-4 text-left hover:bg-gray-50 font-bold transition-all border-l-4 border-transparent flex items-center" data-target="status">
+                    <span class="mr-2">📊</span> ステータス
+                </button>
+                <button class="tab-btn w-full p-4 text-left hover:bg-gray-50 font-bold transition-all border-l-4 border-transparent flex items-center" data-target="task_template">
+                    <span class="mr-2">📋</span> タスク雛形
+                </button>
+                <button class="tab-btn w-full p-4 text-left hover:bg-gray-50 font-bold transition-all border-l-4 border-transparent flex items-center" data-target="holiday">
+                    <span class="mr-2">📅</span> 休日
+                </button>
+            </nav>
         </div>
-        <div class="flex-1 p-4 overflow-auto bg-white" id="editor-container">
+
+        <!-- Main Content -->
+        <div class="flex-1 p-8 overflow-auto bg-slate-50" id="editor-container">
             <!-- Table dynamically injected here -->
         </div>
     </div>
@@ -51,14 +74,43 @@
 
         let currentTab = 'release';
         
-        // get project name from query param
         const urlParams = new URLSearchParams(window.location.search);
         const projectName = urlParams.get('project') || 'Sample';
 
+        // 設定保存・復元用
+        async function saveUISettings(newSettings) {
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newSettings)
+                });
+            } catch (e) { console.error(e); }
+        }
+
         async function loadMasters() {
-            const res = await fetch(`/api/masters?project=${projectName}`);
-            mastersData = await res.json();
-            renderTable();
+            try {
+                const resSettings = await fetch('/api/settings');
+                const settings = await resSettings.json();
+                
+                const res = await fetch(`/api/masters?project=${projectName}`);
+                mastersData = await res.json();
+
+                // 最後に開いていたタブを復元
+                if (settings.currentTab) {
+                    const btn = document.querySelector(`.tab-btn[data-target="${settings.currentTab}"]`);
+                    if (btn) {
+                        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentTab = settings.currentTab;
+                    }
+                }
+                
+                renderTable();
+            } catch (e) {
+                console.error("Master load error:", e);
+                alert("マスタの読み込みに失敗しました。");
+            }
         }
 
         function renderTable() {
@@ -68,90 +120,194 @@
             const schema = schemas[currentTab];
             const data = mastersData[currentTab] || [];
 
+            // タイトルとツールバーのコンテナ
+            const headerSection = document.createElement('div');
+            headerSection.className = 'flex justify-between items-end mb-6';
+            
+            const titleInfo = document.createElement('div');
+            const tabNames = {
+                release: 'リリース設定',
+                character: 'キャラクター定義',
+                section: 'セクション管理',
+                member: 'メンバー構成',
+                status: 'ステータス定義',
+                task_template: 'タスク雛形設定',
+                holiday: 'カレンダー・休日'
+            };
+            titleInfo.innerHTML = `
+                <h2 class="text-2xl font-bold text-slate-800">${tabNames[currentTab] || currentTab}</h2>
+                <p class="text-sm text-slate-500 mt-1">${data.length} 件のデータが登録されています</p>
+            `;
+            headerSection.appendChild(titleInfo);
+
+            const toolbar = document.createElement('div');
+            toolbar.className = 'flex items-center space-x-2';
+            toolbar.innerHTML = `
+                <button id="btn-tab-import" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded shadow transition-all flex items-center text-sm font-bold active:scale-95">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    CSVインポート
+                </button>
+                <button id="btn-tab-export" class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded shadow transition-all flex items-center text-sm font-bold active:scale-95">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4 4m0 0l4-4m-4 4V4"></path></svg>
+                    CSVエクスポート
+                </button>
+                <button id="btn-tab-save" class="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2 rounded shadow transition-all text-sm font-bold active:scale-95 ml-2">
+                    マスタ保存
+                </button>
+            `;
+            headerSection.appendChild(toolbar);
+            container.appendChild(headerSection);
+
+            toolbar.querySelector('#btn-tab-import').onclick = () => document.getElementById('csv-upload').click();
+            toolbar.querySelector('#btn-tab-export').onclick = exportToCSV;
+            toolbar.querySelector('#btn-tab-save').onclick = saveSingleMaster;
+
+            const tableWrapper = document.createElement('div');
+            tableWrapper.className = 'bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200';
+
             const table = document.createElement('table');
-            table.className = 'min-w-full bg-white border';
+            table.className = 'min-w-full divide-y divide-slate-200';
             
             // Header
             const thead = document.createElement('thead');
+            thead.className = 'bg-slate-50';
             const trHead = document.createElement('tr');
+            
             const thDrag = document.createElement('th');
-            thDrag.className = 'py-2 px-2 border-b bg-gray-100 text-center w-10';
+            thDrag.className = 'py-4 px-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest w-16';
             thDrag.textContent = '並替';
             trHead.appendChild(thDrag);
+            
             schema.forEach(col => {
                 const th = document.createElement('th');
-                th.className = 'py-2 px-4 border-b bg-gray-100 text-left text-sm font-bold text-gray-600';
+                th.className = 'py-4 px-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider';
                 th.textContent = col;
                 trHead.appendChild(th);
             });
+            
             const thAction = document.createElement('th');
-            thAction.className = 'py-2 px-4 border-b bg-gray-100 text-left';
+            thAction.className = 'py-4 px-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest w-24';
             thAction.textContent = '操作';
             trHead.appendChild(thAction);
+            
             thead.appendChild(trHead);
             table.appendChild(thead);
 
             // Body
             const tbody = document.createElement('tbody');
+            tbody.className = 'bg-white divide-y divide-slate-200';
             let draggedIndex = -1;
+            
+            if (data.length === 0) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = schema.length + 2;
+                td.className = 'py-20 text-center bg-slate-50/50';
+                td.innerHTML = `
+                    <div class="flex flex-col items-center">
+                        <div class="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center mb-4">
+                            <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        </div>
+                        <p class="text-slate-500 font-medium mb-4">データが登録されていません</p>
+                        <button class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2.5 rounded-lg shadow-lg font-bold transition-all active:scale-95 flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                            最初の行を追加
+                        </button>
+                    </div>
+                `;
+                td.querySelector('button').onclick = () => {
+                    const newRow = {};
+                    schema.forEach(col => newRow[col] = '');
+                    mastersData[currentTab].push(newRow);
+                    renderTable();
+                };
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+            }
 
             data.forEach((row, index) => {
                 const tr = document.createElement('tr');
                 tr.draggable = true;
                 tr.dataset.index = index;
+                tr.className = 'group relative hover:bg-blue-50/50 transition-all';
                 
                 const tdDrag = document.createElement('td');
-                tdDrag.className = 'py-1 px-2 border-b text-center text-gray-400 cursor-grab hover:text-gray-600';
-                tdDrag.innerHTML = '≡';
+                tdDrag.className = 'py-3 px-4 text-center text-slate-300 cursor-grab hover:text-slate-500 transition-colors relative';
+                tdDrag.innerHTML = `
+                    <svg class="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path></svg>
+                `;
+
+                // 行間挿入ボタン
+                const insertBtn = document.createElement('button');
+                insertBtn.className = 'absolute -top-3 left-4 w-6 h-6 bg-blue-500 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all z-10 flex items-center justify-center text-xl font-bold hover:bg-blue-600 hover:scale-110 active:scale-90';
+                insertBtn.innerHTML = '+';
+                insertBtn.title = 'この位置に挿入';
+                insertBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const newRow = {};
+                    schema.forEach(col => newRow[col] = '');
+                    mastersData[currentTab].splice(index, 0, newRow);
+                    renderTable();
+                };
+                tdDrag.appendChild(insertBtn);
+
+                if (index === data.length - 1) {
+                    const insertLastBtn = document.createElement('button');
+                    insertLastBtn.className = 'absolute -bottom-3 left-4 w-6 h-6 bg-blue-500 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all z-10 flex items-center justify-center text-xl font-bold hover:bg-blue-600 hover:scale-110 active:scale-90';
+                    insertLastBtn.innerHTML = '+';
+                    insertLastBtn.title = '末尾に追加';
+                    insertLastBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        const newRow = {};
+                        schema.forEach(col => newRow[col] = '');
+                        mastersData[currentTab].push(newRow);
+                        renderTable();
+                    };
+                    tdDrag.appendChild(insertLastBtn);
+                }
+
                 tr.appendChild(tdDrag);
 
                 tr.addEventListener('dragstart', (e) => {
                     draggedIndex = index;
                     e.dataTransfer.effectAllowed = 'move';
-                    setTimeout(() => tr.classList.add('opacity-50'), 0);
+                    setTimeout(() => tr.classList.add('opacity-20', 'bg-slate-100'), 0);
                 });
-
                 tr.addEventListener('dragover', (e) => {
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
-                    tr.classList.add('bg-blue-50');
+                    tr.classList.add('bg-blue-100');
                 });
-
-                tr.addEventListener('dragleave', () => {
-                    tr.classList.remove('bg-blue-50');
-                });
-
+                tr.addEventListener('dragleave', () => tr.classList.remove('bg-blue-100'));
                 tr.addEventListener('drop', (e) => {
                     e.preventDefault();
-                    tr.classList.remove('bg-blue-50');
+                    tr.classList.remove('bg-blue-100');
                     if (draggedIndex === -1 || draggedIndex === index) return;
-                    
-                    const targetIndex = index;
                     const items = mastersData[currentTab];
                     const item = items.splice(draggedIndex, 1)[0];
-                    items.splice(targetIndex, 0, item);
-                    
+                    items.splice(index, 0, item);
                     renderTable();
                 });
-
                 tr.addEventListener('dragend', () => {
-                    tr.classList.remove('opacity-50');
+                    tr.classList.remove('opacity-20', 'bg-slate-100');
                     draggedIndex = -1;
                 });
 
                 schema.forEach(col => {
                     const td = document.createElement('td');
-                    td.className = 'py-1 px-2 border-b';
+                    td.className = 'py-2 px-3';
                     const input = document.createElement('input');
                     if (col.includes('color')) {
                         input.type = 'color';
+                        input.className = 'h-9 w-14 border border-slate-200 p-1 rounded cursor-pointer bg-white';
                     } else if (col.includes('date') || col.includes('deadline')) {
                         input.type = 'date';
+                        input.className = 'w-full border border-slate-200 p-2 rounded text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none';
                     } else {
                         input.type = 'text';
+                        input.className = 'w-full border border-slate-200 p-2 rounded text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-shadow';
                     }
                     input.value = row[col] || '';
-                    input.className = 'w-full border p-1 rounded';
                     input.onchange = (e) => {
                         mastersData[currentTab][index][col] = e.target.value;
                     };
@@ -160,13 +316,15 @@
                 });
                 
                 const tdAction = document.createElement('td');
-                tdAction.className = 'py-1 px-2 border-b';
+                tdAction.className = 'py-2 px-4 text-center';
                 const delBtn = document.createElement('button');
                 delBtn.textContent = '削除';
-                delBtn.className = 'bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-bold';
+                delBtn.className = 'bg-slate-100 hover:bg-red-500 hover:text-white text-slate-500 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all';
                 delBtn.onclick = () => {
-                    mastersData[currentTab].splice(index, 1);
-                    renderTable();
+                    if (confirm('この行を削除しますか？')) {
+                        mastersData[currentTab].splice(index, 1);
+                        renderTable();
+                    }
                 };
                 tdAction.appendChild(delBtn);
                 tr.appendChild(tdAction);
@@ -174,151 +332,130 @@
                 tbody.appendChild(tr);
             });
             table.appendChild(tbody);
-            container.appendChild(table);
-
-            const addBtn = document.createElement('button');
-            addBtn.textContent = '+ 行を追加';
-            addBtn.className = 'mt-4 bg-blue-500 text-white px-4 py-2 rounded';
-            addBtn.onclick = () => {
-                const newRow = {};
-                schema.forEach(col => newRow[col] = '');
-                mastersData[currentTab].push(newRow);
-                renderTable();
-            };
-            container.appendChild(addBtn);
+            tableWrapper.appendChild(table);
+            container.appendChild(tableWrapper);
         }
 
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-                currentTab = e.target.dataset.target;
-                renderTable();
-            });
-        });
-
-        function parseCSV(csvText) {
-            const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
-            if (lines.length < 2) return [];
-            
-            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-            
-            const result = [];
-            for (let i = 1; i < lines.length; i++) {
-                const values = [];
-                let inQuote = false;
-                let currentValue = '';
-                const line = lines[i];
-                
-                for (let j = 0; j < line.length; j++) {
-                    const char = line[j];
-                    if (char === '"') {
-                        inQuote = !inQuote;
-                    } else if (char === ',' && !inQuote) {
-                        values.push(currentValue);
-                        currentValue = '';
-                    } else {
-                        currentValue += char;
-                    }
-                }
-                values.push(currentValue);
-                
-                const row = {};
-                headers.forEach((header, index) => {
-                    row[header] = values[index] !== undefined ? values[index].trim().replace(/^"|"$/g, '') : '';
-                });
-                result.push(row);
-            }
-            return result;
-        }
-
-        document.getElementById('btn-import-csv').addEventListener('click', () => {
-            document.getElementById('csv-upload').click();
-        });
-
-        document.getElementById('csv-upload').addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                let text = event.target.result;
-                
-                if (text.charCodeAt(0) === 0xFEFF) {
-                    text = text.slice(1);
-                }
-
-                try {
-                    const parsedData = parseCSV(text);
-                    
-                    if (parsedData.length > 0) {
-                        const schema = schemas[currentTab];
-                        const newMasterData = [];
-                        
-                        parsedData.forEach(row => {
-                            const newRow = {};
-                            schema.forEach(col => {
-                                let val = row[col] !== undefined ? row[col] : '';
-                                // 日付の変換 (YYYY/MM/DD -> YYYY-MM-DD)
-                                if (val && (col.includes('date') || col.includes('deadline'))) {
-                                    if (val.includes('/')) {
-                                        const parts = val.split('/');
-                                        if (parts.length === 3) {
-                                            const y = parts[0];
-                                            const m = parts[1].padStart(2, '0');
-                                            const d = parts[2].padStart(2, '0');
-                                            val = `${y}-${m}-${d}`;
-                                        } else {
-                                            val = val.replace(/\//g, '-');
-                                        }
-                                    }
-                                }
-                                newRow[col] = val;
-                            });
-                            newMasterData.push(newRow);
-                        });
-
-                        mastersData[currentTab] = newMasterData;
-                        renderTable();
-                        alert(`${currentTab} タブに ${newMasterData.length} 件のデータをインポートしました。\n※まだ保存されていません。「全マスタ保存」を押して確定してください。`);
-                    } else {
-                        alert('CSVファイルにデータがありません。');
-                    }
-                } catch (err) {
-                    console.error(err);
-                    alert('CSVの読み込みに失敗しました。フォーマットを確認してください。');
-                }
-                
-                e.target.value = '';
-            };
-            
-            reader.readAsText(file, 'utf-8');
-        });
-
-        document.getElementById('btn-save-masters').addEventListener('click', async () => {
+        async function saveSingleMaster() {
             try {
+                const singleData = {};
+                singleData[currentTab] = mastersData[currentTab];
                 const res = await fetch(`/api/masters/save?project=${projectName}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(mastersData)
+                    body: JSON.stringify(singleData)
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    alert('マスタデータを保存しました。');
+                    alert(`${currentTab} マスタを個別に保存しました。`);
                 } else {
                     alert('保存に失敗しました: ' + result.message);
                 }
             } catch (err) {
                 alert('エラーが発生しました');
             }
+        }
+
+        function exportToCSV() {
+            const data = mastersData[currentTab];
+            if (!data || data.length === 0) return alert('データがありません');
+            const schema = schemas[currentTab];
+            const csv = [
+                schema.join(','),
+                ...data.map(row => schema.map(col => {
+                    let v = String(row[col] || '');
+                    if (v.includes(',') || v.includes('\n') || v.includes('"')) v = `"${v.replace(/"/g, '""')}"`;
+                    return v;
+                }).join(','))
+            ].join('\n');
+            const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentTab}_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                const target = e.currentTarget;
+                target.classList.add('active');
+                currentTab = target.dataset.target;
+                renderTable();
+                saveUISettings({ currentTab: currentTab });
+            });
+        });
+
+        function parseCSV(csvText) {
+            const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length < 1) return [];
+            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            const result = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = [];
+                let inQuote = false, cur = '';
+                const line = lines[i];
+                for (let j = 0; j < line.length; j++) {
+                    const c = line[j];
+                    if (c === '"') inQuote = !inQuote;
+                    else if (c === ',' && !inQuote) { values.push(cur); cur = ''; }
+                    else cur += c;
+                }
+                values.push(cur);
+                const row = {};
+                headers.forEach((h, idx) => row[h] = (values[idx] || '').trim().replace(/^"|"$/g, ''));
+                result.push(row);
+            }
+            return result;
+        }
+
+        document.getElementById('csv-upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    let text = event.target.result;
+                    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+                    const parsed = parseCSV(text);
+                    const schema = schemas[currentTab];
+                    mastersData[currentTab] = parsed.map(row => {
+                        const newRow = {};
+                        schema.forEach(col => {
+                            let v = row[col] || '';
+                            if (v && (col.includes('date') || col.includes('deadline')) && v.includes('/')) {
+                                const p = v.split('/');
+                                if (p.length === 3) v = `${p[0]}-${p[1].padStart(2, '0')}-${p[2].padStart(2, '0')}`;
+                            }
+                            newRow[col] = v;
+                        });
+                        return newRow;
+                    });
+                    renderTable();
+                    alert(`${currentTab} タブを読み込みました。「マスタ保存」で確定してください。`);
+                } catch (err) { alert('読み込みに失敗しました'); }
+                e.target.value = '';
+            };
+            reader.readAsText(file, 'utf-8');
+        });
+
+        document.getElementById('btn-save-masters').addEventListener('click', async () => {
+            if (!confirm('全マスタを一括保存しますか？')) return;
+            try {
+                const res = await fetch(`/api/masters/save?project=${projectName}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(mastersData)
+                });
+                if ((await res.json()).status === 'success') alert('全保存完了');
+                else alert('保存失敗');
+            } catch (err) { alert('エラー'); }
         });
 
         loadMasters();
+        setInterval(() => fetch('/api/heartbeat', { method: 'POST' }).catch(() => {}), 3000);
     </script>
 </body>
-<script>
-    setInterval(() => {
-        fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
-    }, 3000);
-</script>
 </html>

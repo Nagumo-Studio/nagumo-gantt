@@ -2,7 +2,13 @@ import os
 import sys
 import csv
 import glob
+import logging
 from flask import Flask, render_template, jsonify, request, make_response
+
+# pythonw.exe での起動時に標準出力・エラー出力を無効化（エラー防止）
+if sys.executable.endswith("pythonw.exe"):
+    sys.stdout = open(os.devnull, "w")
+    sys.stderr = open(os.devnull, "w")
 
 if getattr(sys, 'frozen', False):
     template_folder = os.path.join(sys._MEIPASS, 'templates')
@@ -268,6 +274,37 @@ def save_masters():
                 filename, fieldnames = master_files[key]
                 filepath = os.path.join(p_dir, filename)
                 write_dicts_to_csv(filepath, fieldnames, records)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+SETTINGS_FILE = os.path.join(COMMON_DIR, 'user_settings.json')
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            try:
+                return jsonify(json.load(f))
+            except:
+                return jsonify({})
+    return jsonify({})
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    try:
+        data = request.json
+        existing = {}
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                try:
+                    existing = json.load(f)
+                except:
+                    pass
+        existing.update(data)
+        os.makedirs(COMMON_DIR, exist_ok=True)
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

@@ -203,22 +203,32 @@
                 <input type="hidden" id="edit-task-id">
                 <input type="hidden" id="edit-group-type">
                 
-                <div id="editor-field-release">
-                    <label class="block font-bold mb-1">バージョン</label>
-                    <select id="edit-release" class="w-full border rounded p-2"></select>
+                <div id="editor-field-release" class="relative">
+                    <label class="block font-bold mb-1 text-xs text-gray-500 uppercase tracking-wider">バージョン</label>
+                    <input type="text" id="edit-release-search" class="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="検索・入力...">
+                    <div id="edit-release-list" class="hidden absolute top-full left-0 w-full bg-white border rounded shadow-xl z-[100] max-h-48 overflow-y-auto"></div>
+                    <input type="hidden" id="edit-release">
                 </div>
                 
-                <div id="editor-field-event">
-                    <label class="block font-bold mb-1">イベント</label>
-                    <input type="text" id="edit-event" class="w-full border rounded p-2 bg-gray-100" readonly placeholder="マスタデータ参照">
+                <div id="editor-field-event" class="mt-4">
+                    <label class="block font-bold mb-1 text-xs text-gray-500 uppercase tracking-wider">イベント</label>
+                    <input type="text" id="edit-event" class="w-full border rounded p-2 text-sm bg-gray-50 text-gray-600" readonly placeholder="マスタデータ参照">
                 </div>
 
-                <div id="editor-field-character">
-                    <label class="block font-bold mb-1">キャラクター名</label>
-                    <select id="edit-character-name" class="w-full border rounded p-2 mb-2"></select>
-                    <label class="block font-bold mb-1">衣装名</label>
-                    <select id="edit-character-costume" class="w-full border rounded p-2"></select>
-                    <input type="hidden" id="edit-character">
+                <div class="space-y-4 mt-6 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    <div id="editor-field-character-name" class="relative">
+                        <label class="block font-bold mb-1 text-xs text-blue-600 uppercase tracking-wider">キャラクター名</label>
+                        <input type="text" id="edit-character-name-search" class="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="キャラクターを検索...">
+                        <div id="edit-character-name-list" class="hidden absolute top-full left-0 w-full bg-white border rounded shadow-xl z-[100] max-h-48 overflow-y-auto"></div>
+                        <input type="hidden" id="edit-character-name-hidden">
+                    </div>
+
+                    <div id="editor-field-character-costume" class="relative">
+                        <label class="block font-bold mb-1 text-xs text-blue-600 uppercase tracking-wider">衣装名</label>
+                        <input type="text" id="edit-character-costume-search" class="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="衣装を選択...">
+                        <div id="edit-character-costume-list" class="hidden absolute top-full left-0 w-full bg-white border rounded shadow-xl z-[100] max-h-48 overflow-y-auto"></div>
+                        <input type="hidden" id="edit-character">
+                    </div>
                 </div>
 
                 <div id="editor-field-section">
@@ -466,6 +476,23 @@
             <div class="border-t my-1 menu-item ctx-separator-3"></div>
             
             <div class="px-4 py-2 hover:bg-red-100 cursor-pointer font-bold text-red-600 menu-item ctx-item-task" id="ctx-delete">削除 (Delete)</div>
+        </div>
+    </div>
+
+    <!-- Bottom Log Console -->
+    <div id="log-console-container" class="bg-slate-900 text-gray-300 border-t border-slate-700 z-50 h-8 flex flex-col overflow-hidden shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+        <div class="flex items-center justify-between px-3 py-1 bg-slate-800 cursor-row-resize select-none border-b border-slate-700 hover:bg-slate-700 transition-colors" id="log-console-header" title="ドラッグして高さを調整">
+            <div class="flex items-center space-x-2 text-[10px] font-mono pointer-events-none">
+                <span class="text-green-500">●</span>
+                <span class="font-bold">SYSTEM LOG</span>
+                <span id="log-count" class="bg-slate-700 px-1 rounded text-gray-400">0</span>
+            </div>
+            <div class="flex items-center">
+                <button id="btn-clear-log" class="text-[10px] bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded text-gray-300 hover:text-white transition-colors">CLEAR</button>
+            </div>
+        </div>
+        <div id="log-console-body" class="flex-1 overflow-y-auto p-2 font-mono text-[10px] space-y-0.5 whitespace-pre-wrap selection:bg-blue-500/30">
+            <!-- Logs injected here -->
         </div>
     </div>
 

@@ -181,27 +181,366 @@ let dependencyDragCurrentPos = null;
 let insertTargetIndex = -1; // 新規タスク挿入位置
 let lastHoveredTaskId = null; // 強調表示用
 
+// --- UISettings ---
+let uiSettings = {};
+let saveSettingsTimeout = null;
+let isInitialLoading = false; // 追加
+
+async function loadUISettings() {
+    try {
+        const res = await fetch('/api/settings');
+        uiSettings = await res.json();
+        console.log("UI Settings loaded:", uiSettings);
+    } catch (e) {
+        console.error("Failed to load UI settings:", e);
+    }
+}
+
+// --- Combo Box Logic ---
+function initComboBox(searchId, listId, hiddenId, data, idKey, nameKey, onSelectCallback = null) {
+    const searchInput = document.getElementById(searchId);
+    const listDiv = document.getElementById(listId);
+    const hiddenInput = document.getElementById(hiddenId);
+    if (!searchInput || !listDiv || !hiddenInput) return;
+
+    // データを要素に保持（更新可能にする）
+    searchInput.comboBoxData = data || [];
+    searchInput.comboBoxOnSelect = onSelectCallback;
+
+    // 初期化済みならリスナー登録をスキップ
+    if (searchInput.dataset.comboInitialized === 'true') return;
+
+    const renderList = (filter = '') => {
+        const currentData = searchInput.comboBoxData || [];
+        const filtered = currentData.filter(item => 
+            String(item[nameKey]).toLowerCase().includes(filter.toLowerCase())
+        );
+        
+        listDiv.innerHTML = '';
+        filtered.forEach(item => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm border-b border-gray-50 last:border-0 transition-colors';
+            itemDiv.textContent = item[nameKey];
+            itemDiv.onclick = (e) => {
+                e.stopPropagation();
+                searchInput.value = item[nameKey];
+                hiddenInput.value = item[idKey];
+                listDiv.classList.add('hidden');
+                if (searchInput.comboBoxOnSelect) searchInput.comboBoxOnSelect(item[idKey], item[nameKey]);
+                
+                // バリデーション等をトリガー
+                hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+                hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+            listDiv.appendChild(itemDiv);
+        });
+        
+        if (filtered.length > 0) {
+            listDiv.classList.remove('hidden');
+            listDiv.style.zIndex = '20000'; // エディタより前面に
+        } else {
+            listDiv.classList.add('hidden');
+        }
+    };
+
+    searchInput.addEventListener('focus', () => renderList(searchInput.value));
+    searchInput.addEventListener('input', () => renderList(searchInput.value));
+    
+    // 他の場所をクリックしたら閉じる
+    document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !listDiv.contains(e.target)) {
+            listDiv.classList.add('hidden');
+        }
+    });
+
+    searchInput.dataset.comboInitialized = 'true';
+}
+
+function getCurrentProjectSettings() {
+    if (!currentProject) return {};
+    if (!uiSettings.projects) uiSettings.projects = {};
+    if (!uiSettings.projects[currentProject]) uiSettings.projects[currentProject] = {};
+    return uiSettings.projects[currentProject];
+}
+
+function syncCurrentStateToSettings() {
+    if (!currentProject || isInitialLoading) return; // ロード中は同期しない
+    const pSettings = getCurrentProjectSettings();
+    
+    // スクロール位置
+    pSettings.scrollLeft = els.ganttBody.scrollLeft;
+    pSettings.scrollTop = els.ganttBody.scrollTop;
+    
+    // ズーム・スケール
+    pSettings.dayWidth = ganttConfig.dayWidth;
+    pSettings.uiScale = ganttConfig.uiScale;
+    
+    // フィルタ
+    const ft = document.getElementById('filter-text');
+    if (ft) pSettings.filterText = ft.value;
+    
+    const fs = document.getElementById('filter-section');
+    if (fs) pSettings.filterSection = fs.value;
+    
+    if (els.toggleProgressLine) pSettings.toggleProgressLine = els.toggleProgressLine.checked;
+    
+    pSettings.selectedMembers = window.getSelectedMembers ? window.getSelectedMembers() : [];
+    pSettings.selectedStatuses = window.getSelectedStatuses ? window.getSelectedStatuses() : [];
+}
+
+function saveUISettings(newSettings = {}) {
+    if (isInitialLoading) return; // ロード中は保存をスキップ
+    // グローバルな設定の更新
+    if (newSettings.currentProject) uiSettings.currentProject = newSettings.currentProject;
+    if (newSettings.currentTab) uiSettings.currentTab = newSettings.currentTab;
+    if (newSettings.openProjects) uiSettings.openProjects = newSettings.openProjects;
+
+    // プロジェクト別設定の更新
+    if (currentProject) {
+        const pSettings = getCurrentProjectSettings();
+        const excludeKeys = ['currentProject', 'currentTab', 'openProjects'];
+        Object.keys(newSettings).forEach(key => {
+            if (!excludeKeys.includes(key)) {
+                pSettings[key] = newSettings[key];
+            }
+        });
+    }
+
+    if (saveSettingsTimeout) clearTimeout(saveSettingsTimeout);
+    saveSettingsTimeout = setTimeout(async () => {
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(uiSettings)
+            });
+        } catch (e) {
+            console.error("Failed to save UI settings:", e);
+        }
+    }, 1000);
+}
+
+async function saveMastersOrder(type) {
+    if (!masters[type] || masters[type].length === 0) {
+        console.warn(`saveMastersOrder: Aborted. ${type} data is empty or null.`);
+        return;
+    }
+    try {
+        const payload = {};
+        payload[type] = masters[type];
+        await fetch(`/api/masters/save?project=${currentProject}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        console.log(`Saved ${type} order to server. count: ${masters[type].length}`);
+    } catch (e) {
+        console.error(`Failed to save ${type} order:`, e);
+    }
+}
+
+function applyUISettingsToUI(settings) {
+    if (!settings) return;
+    
+    // ズーム・スケールの復元
+    if (settings.dayWidth) ganttConfig.dayWidth = settings.dayWidth;
+    if (settings.uiScale) {
+        ganttConfig.uiScale = settings.uiScale;
+        ganttConfig.rowHeight = 36 * ganttConfig.uiScale;
+        document.documentElement.style.setProperty('--ui-scale', ganttConfig.uiScale);
+    }
+    
+    // イナズマ線の復元
+    if (settings.toggleProgressLine !== undefined && els.toggleProgressLine) {
+        els.toggleProgressLine.checked = settings.toggleProgressLine;
+    }
+    
+    // フィルタの復元
+    if (settings.filterText !== undefined) {
+        const ft = document.getElementById('filter-text');
+        if (ft) ft.value = settings.filterText;
+    }
+    if (settings.filterSection !== undefined) {
+        const fs = document.getElementById('filter-section');
+        if (fs) fs.value = settings.filterSection;
+    }
+
+    // 担当者フィルタの復元（新しいプロジェクトのマスタに存在するものだけ）
+    if (settings.selectedMembers && masters.member) {
+        const validMemberIds = masters.member.map(m => m.member_id);
+        const filteredMembers = settings.selectedMembers.filter(id => validMemberIds.includes(id));
+        
+        document.querySelectorAll('.member-filter-cb').forEach(cb => {
+            cb.checked = filteredMembers.includes(cb.value);
+        });
+    } else {
+        // 設定がなければ全チェック解除（＝全員表示）
+        document.querySelectorAll('.member-filter-cb').forEach(cb => cb.checked = false);
+    }
+    
+    // ステータスフィルタの復元
+    if (settings.selectedStatuses && masters.status) {
+        const validStatusIds = masters.status.map(s => s.status_id);
+        const filteredStatuses = settings.selectedStatuses.filter(id => validStatusIds.includes(id));
+        
+        document.querySelectorAll('.status-filter-cb').forEach(cb => {
+            cb.checked = filteredStatuses.includes(cb.value);
+        });
+    } else {
+        document.querySelectorAll('.status-filter-cb').forEach(cb => cb.checked = false);
+    }
+
+    // テキスト表示の同期
+    updateMemberFilterText();
+    updateStatusFilterText();
+}
+
+// --- Log Console Logic ---
+let logCount = 0;
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+
+function addLogToConsole(msg, type = 'info') {
+    const body = document.getElementById('log-console-body');
+    const countEl = document.getElementById('log-count');
+    if (!body || !countEl) return;
+
+    const time = new Date().toLocaleTimeString('ja-JP', { hour12: false });
+    const div = document.createElement('div');
+    const colorClass = type === 'error' ? 'text-red-400' : (type === 'warn' ? 'text-yellow-400' : 'text-gray-300');
+    
+    // 文字列化
+    let text = msg;
+    if (typeof msg === 'object') {
+        try { text = JSON.stringify(msg); } catch(e) { text = String(msg); }
+    }
+    
+    div.innerHTML = `<span class="text-slate-600 mr-2">${time}</span><span class="${colorClass}">${text}</span>`;
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+    
+    logCount++;
+    countEl.textContent = logCount;
+    if (body.children.length > 200) body.removeChild(body.firstChild);
+}
+
+console.log = (...args) => {
+    originalConsoleLog.apply(console, args);
+    addLogToConsole(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '), 'info');
+};
+console.error = (...args) => {
+    originalConsoleError.apply(console, args);
+    addLogToConsole(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '), 'error');
+};
+console.warn = (...args) => {
+    originalConsoleWarn.apply(console, args);
+    addLogToConsole(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '), 'warn');
+};
+
+function setupLogConsole() {
+    const container = document.getElementById('log-console-container');
+    const header = document.getElementById('log-console-header');
+    const btnClear = document.getElementById('btn-clear-log');
+    
+    if (!container || !header) return;
+    
+    let isResizing = false;
+    let startY, startHeight;
+
+    header.addEventListener('mousedown', (e) => {
+        if (e.target.closest('#btn-clear-log')) return;
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = container.offsetHeight;
+        document.body.classList.add('select-none');
+        document.body.style.cursor = 'row-resize';
+        
+        const onMouseMove = (ev) => {
+            if (!isResizing) return;
+            const dy = startY - ev.clientY;
+            const newHeight = Math.max(32, Math.min(window.innerHeight / 2, startHeight + dy));
+            container.style.height = `${newHeight}px`;
+        };
+        
+        const onMouseUp = () => {
+            isResizing = false;
+            document.body.classList.remove('select-none');
+            document.body.style.cursor = '';
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
+        
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+
+    btnClear.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const body = document.getElementById('log-console-body');
+        if (body) body.innerHTML = '';
+        logCount = 0;
+        document.getElementById('log-count').textContent = '0';
+    });
+}
+
 // --- Initialization ---
 async function init() {
+    setupLogConsole();
+    isInitialLoading = true;
+    await loadUISettings();
+    
+    // プロジェクトの復元
+    if (uiSettings.currentProject) {
+        currentProject = uiSettings.currentProject;
+    }
+
     await fetchLlmPricing();
     await fetchProjects();
     await reloadData();
+
+    // 現在のプロジェクト設定を適用
+    const pSettings = getCurrentProjectSettings();
+    applyUISettingsToUI(pSettings);
+
     setupScrollSync();
     setupMouseTracking();
     setupZoom();
     setupMiscEvents();
-    scrollToDate(moment());
+
+    renderGantt();
+
+    // スクロール位置の復元
+    setTimeout(() => {
+        const settings = getCurrentProjectSettings();
+        if (settings.scrollLeft !== undefined) els.ganttBody.scrollLeft = settings.scrollLeft;
+        if (settings.scrollTop !== undefined) els.ganttBody.scrollTop = settings.scrollTop;
+        
+        if (settings.scrollLeft === undefined) {
+            scrollToDate(moment());
+        }
+        isInitialLoading = false; // 全ての復元が終わってからフラグを下ろす
+        
+        // 初回の確定状態を一度保存しておく
+        syncCurrentStateToSettings();
+        saveUISettings({ openProjects: openProjects, currentProject: currentProject });
+    }, 200);
 }
 
 async function fetchProjects() {
     const res = await fetch('/api/projects');
     availableProjects = await res.json();
     
-    const stored = localStorage.getItem('openProjects');
-    if (stored) {
-        try {
-            openProjects = JSON.parse(stored);
-        } catch (e) {}
+    // 設定からロード。無ければLocalStorageから（移行用）
+    if (uiSettings.openProjects && Array.isArray(uiSettings.openProjects) && uiSettings.openProjects.length > 0) {
+        openProjects = uiSettings.openProjects;
+    } else {
+        const stored = localStorage.getItem('openProjects');
+        if (stored) {
+            try {
+                openProjects = JSON.parse(stored);
+            } catch (e) {}
+        }
     }
     
     // 有効なプロジェクトのみ残す
@@ -211,9 +550,8 @@ async function fetchProjects() {
         openProjects = [availableProjects[0]];
     }
     
-    const storedCurrent = localStorage.getItem('currentProject');
-    if (storedCurrent && openProjects.includes(storedCurrent)) {
-        currentProject = storedCurrent;
+    if (uiSettings.currentProject && openProjects.includes(uiSettings.currentProject)) {
+        currentProject = uiSettings.currentProject;
     } else if (openProjects.length > 0) {
         currentProject = openProjects[0];
     } else {
@@ -299,18 +637,37 @@ function renderTabs() {
     
     container.innerHTML = html;
     
-    localStorage.setItem('openProjects', JSON.stringify(openProjects));
-    if (currentProject) localStorage.setItem('currentProject', currentProject);
+    saveUISettings({ openProjects: openProjects, currentProject: currentProject });
 }
 
 async function switchProjectTab(p) {
     if (p === currentProject) return;
     if (hasUnsavedChanges && !confirm('未保存の変更がありますが、プロジェクトを切り替えますか？')) return;
     
+    // 切り替え前に現在のプロジェクト状態を同期保存
+    syncCurrentStateToSettings();
+    
+    isInitialLoading = true;
     currentProject = p;
+    saveUISettings({ currentProject: p });
+    
     setUnsavedState(false);
     renderTabs();
     await reloadData();
+    
+    // 切り替え先プロジェクトの設定を適用
+    const settings = getCurrentProjectSettings();
+    applyUISettingsToUI(settings);
+    
+    renderGantt();
+    
+    // スクロール位置の復元
+    setTimeout(() => {
+        if (settings.scrollLeft !== undefined) els.ganttBody.scrollLeft = settings.scrollLeft;
+        if (settings.scrollTop !== undefined) els.ganttBody.scrollTop = settings.scrollTop;
+        isInitialLoading = false;
+    }, 150);
+
     const meLink = document.getElementById('master-editor-link');
     if (meLink) meLink.href = `/master_editor?project=${currentProject}`;
 }
@@ -421,22 +778,32 @@ async function applyNewProject() {
 }
 
 async function fetchMasters() {
+    console.log(`Fetching masters for project: ${currentProject}`);
     const res = await fetch(`/api/masters?project=${currentProject}`);
     masters = await res.json();
+    console.log("Masters loaded:", Object.keys(masters).map(k => `${k}: ${masters[k]?.length || 0} items`));
+    
     if (masters.section) {
         const filterSel = document.getElementById('filter-section');
         if (filterSel) {
-            const currentVal = filterSel.value;
+            // 保存されていた値を優先
+            const currentVal = (uiSettings && uiSettings.projects && uiSettings.projects[currentProject]?.filterSection) ? uiSettings.projects[currentProject].filterSection : filterSel.value;
             filterSel.innerHTML = '<option value="">全セクション表示</option>' +
                 masters.section.map(s => `<option value="${s.section_id}">${s.section_name}</option>`).join('');
-            if (Array.from(filterSel.options).some(o => o.value === currentVal)) filterSel.value = currentVal;
+            
+            // 選択肢に存在するかチェック
+            if (Array.from(filterSel.options).some(o => o.value === currentVal)) {
+                filterSel.value = currentVal;
+            } else {
+                filterSel.value = ""; // 存在しない場合はリセット
+            }
         }
     }
     if (masters.member) {
         const filterMemberList = document.getElementById('filter-member-list');
         if (filterMemberList) {
-            // 現在のチェック状態を保存（あれば）
-            const currentSelected = window.getSelectedMembers ? window.getSelectedMembers() : [];
+            // 保存されている設定、または現在のチェック状態を取得
+            const currentSelected = (uiSettings && uiSettings.selectedMembers) ? uiSettings.selectedMembers : (window.getSelectedMembers ? window.getSelectedMembers() : []);
             
             let html = '';
             
@@ -565,8 +932,8 @@ async function fetchMasters() {
     if (masters.status) {
         const filterStatusList = document.getElementById('filter-status-list');
         if (filterStatusList) {
-            // 現在のチェック状態を保存（あれば）
-            const currentSelected = window.getSelectedStatuses ? window.getSelectedStatuses() : [];
+            // 保存されている設定、または現在のチェック状態を取得
+            const currentSelected = (uiSettings && uiSettings.selectedStatuses) ? uiSettings.selectedStatuses : (window.getSelectedStatuses ? window.getSelectedStatuses() : []);
             
             filterStatusList.innerHTML = masters.status.map(s => `
                 <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 rounded cursor-pointer status-filter-item">
@@ -603,6 +970,7 @@ window.getSelectedMembers = function() {
 
 function updateMemberFilterText() {
     const selected = window.getSelectedMembers();
+    saveUISettings({ selectedMembers: selected });
     const btnText = document.getElementById('filter-member-text');
     if (!btnText) return;
     
@@ -624,6 +992,7 @@ window.getSelectedStatuses = function() {
 
 function updateStatusFilterText() {
     const selected = window.getSelectedStatuses();
+    saveUISettings({ selectedStatuses: selected });
     const btnText = document.getElementById('filter-status-text');
     if (!btnText) return;
     
@@ -725,6 +1094,7 @@ function setupScrollSync() {
         if (!ticking) {
             window.requestAnimationFrame(() => {
                 const scrollLeft = els.ganttBody.scrollLeft;
+                const scrollTop = els.ganttBody.scrollTop;
                 els.ganttHeaderContent.style.transform = `translate3d(-${scrollLeft}px, 0, 0)`;
                 
                 const stickyLabels = els.ganttHeaderContent.querySelectorAll('.js-sticky-label');
@@ -741,6 +1111,7 @@ function setupScrollSync() {
                     label.style.transform = `translate3d(${shift}px, 0, 0)`;
                 });
                 
+                saveUISettings({ scrollLeft, scrollTop });
                 ticking = false;
             });
             ticking = true;
@@ -777,6 +1148,11 @@ function updateFilteredTasks() {
     const filterTextElem = document.getElementById('filter-text');
     const filterQuery = filterTextElem && filterTextElem.value.trim() !== '' ? filterTextElem.value.trim().toLowerCase() : '';
     
+    const filterSectionElem = document.getElementById('filter-section');
+    const filterSection = filterSectionElem ? filterSectionElem.value : '';
+
+    saveUISettings({ filterText: filterQuery, filterSection: filterSection });
+    
     const selectedMembers = window.getSelectedMembers ? window.getSelectedMembers() : [];
     const selectedStatuses = window.getSelectedStatuses ? window.getSelectedStatuses() : [];
 
@@ -784,6 +1160,9 @@ function updateFilteredTasks() {
         if (selectedMembers.length > 0 && !selectedMembers.includes(t.member_id)) return false;
         if (selectedStatuses.length > 0 && !selectedStatuses.includes(t.status_id)) return false;
         
+        // セクション絞り込み（稼働人員表示用と連動）
+        if (filterSection && t.section_id !== filterSection) return false;
+
         if (filterQuery !== '') {
             const charName = t.char_id ? getMasterItem('character', 'char_id', t.char_id)?.char_name || '' : '';
             const relName = t.release_id ? getMasterItem('release', 'release_id', t.release_id)?.release_name || '' : '';
@@ -1122,7 +1501,10 @@ function renderHeaderAndGrid(totalWidth) {
     heatmapHtml += '</div>';
     
     els.ganttHeaderContent.innerHTML = yearHtml + monthHtml + bottomHtml + heatmapHtml +
-        `<div id="gantt-header-crosshair" class="absolute top-0 bottom-0 bg-blue-500 opacity-20 pointer-events-none hidden" style="z-index: 50;"></div>`;
+        `<div id="gantt-header-crosshair" class="absolute top-0 bottom-0 bg-blue-500/10 pointer-events-none hidden" style="z-index: 50;">
+            <!-- 月と日の行の境界付近に大きく表示 -->
+            <div id="gantt-header-date-tooltip" class="absolute top-[72px] left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/50 text-black text-lg px-2 py-1 rounded border border-black/30 font-bold whitespace-nowrap shadow-md"></div>
+        </div>`;
     els.ganttGrid.innerHTML = gridHtml;
 }
 
@@ -1309,7 +1691,7 @@ function renderTasks() {
         else if (g.type === 'character') barClass = 'bg-gray-400 text-black font-bold gantt-group-bar-character';
 
         html += `
-            <div class="absolute flex items-center px-2 rounded shadow ${g.type === 'character' ? 'cursor-move' : 'cursor-default'} ${barClass}"
+            <div class="absolute flex items-center px-2 rounded shadow cursor-move ${barClass}"
                  style="left:${x}px; top:${taskTop}px; width:${width}px; height:${taskHeight}px; z-index:15; user-select: none;"
                  data-group-id="${g.id}">
                 <span class="mr-2 text-xs cursor-pointer hover:text-blue-300 px-1" onclick="toggleGroup('${g.id}'); event.stopPropagation();">${icon}</span>
@@ -1893,19 +2275,36 @@ function setupMouseTracking() {
             headerCrosshair.style.left = `${dayLeftX}px`;
             headerCrosshair.style.width = `${ganttConfig.dayWidth}px`;
             headerCrosshair.classList.remove('hidden');
+
+            const headerDateTooltip = document.getElementById('gantt-header-date-tooltip');
+            if (headerDateTooltip) {
+                const dayJa = ['日','月','火','水','木','金','土'][dateM.day()];
+                headerDateTooltip.textContent = `${dateM.month() + 1}/${dateM.date()}(${dayJa})`;
+            }
         }
         
-        const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
-        const rowTop = rowIndex * ganttConfig.rowHeight;
-        
-        // グループがない場所でもクロスヘアの行は表示する
-        els.crosshairRow.style.top = `${rowTop}px`;
-        els.crosshairRow.style.height = `${ganttConfig.rowHeight}px`;
-        els.crosshairRow.classList.remove('hidden');
+        // 正確な行判定（動的な高さに対応）
+        let hoveredGroup = null;
+        for (let i = 0; i < ganttConfig.groups.length; i++) {
+            const g = ganttConfig.groups[i];
+            if (mouseY >= g.top && mouseY < g.top + g.height) {
+                hoveredGroup = g;
+                break;
+            }
+        }
 
-        if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-            currentHoverGroup = ganttConfig.groups[rowIndex].id;
+        if (hoveredGroup) {
+            els.crosshairRow.style.top = `${hoveredGroup.top}px`;
+            els.crosshairRow.style.height = `${hoveredGroup.height}px`;
+            els.crosshairRow.classList.remove('hidden');
+            currentHoverGroup = hoveredGroup.id;
         } else {
+            // グループがない場所でもクロスヘアの行は表示する
+            const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
+            const rowTop = rowIndex * ganttConfig.rowHeight;
+            els.crosshairRow.style.top = `${rowTop}px`;
+            els.crosshairRow.style.height = `${ganttConfig.rowHeight}px`;
+            els.crosshairRow.classList.remove('hidden');
             currentHoverGroup = null;
         }
         
@@ -2045,7 +2444,7 @@ function setupMouseTracking() {
             return;
         }
 
-        const groupBar = e.target.closest('.gantt-group-bar-character');
+        const groupBar = e.target.closest('.gantt-group-bar-character, .gantt-group-bar-release');
         if (groupBar && !e.target.closest('.cursor-pointer')) {
             e.preventDefault();
             e.stopPropagation();
@@ -2417,71 +2816,110 @@ function setupMouseTracking() {
                     const draggedGroup = ganttConfig.groups.find(g => g.id === dragState.groupId);
                     
                     if (draggedGroup && targetGroup && targetGroup.id !== draggedGroup.id) {
-                        let targetRelId, targetCharId;
+                        saveHistory();
                         
-                        if (targetGroup.type === 'character') {
-                            targetRelId = targetGroup.parentId;
-                            targetCharId = targetGroup.raw.char_id;
-                        } else if (targetGroup.type === 'lane') {
-                            const parentCharGroup = ganttConfig.groups.find(g => g.id === targetGroup.parentId);
-                            if (parentCharGroup) {
-                                targetRelId = parentCharGroup.parentId;
-                                targetCharId = parentCharGroup.raw.char_id;
+                        // --- リリースの入れ替え ---
+                        if (draggedGroup.type === 'release') {
+                            let targetRelId = null;
+                            if (targetGroup.type === 'release') targetRelId = targetGroup.id;
+                            else if (targetGroup.type === 'character') targetRelId = targetGroup.parentId;
+                            else if (targetGroup.type === 'lane') {
+                                const p = ganttConfig.groups.find(g => g.id === targetGroup.parentId);
+                                if (p) targetRelId = p.parentId;
+                            }
+
+                            if (targetRelId && targetRelId !== draggedGroup.id) {
+                                const relIds = masters.release.map(r => String(r.release_id));
+                                const fromIdx = relIds.indexOf(String(draggedGroup.id));
+                                const toIdx = relIds.indexOf(String(targetRelId));
+                                
+                                if (fromIdx !== -1 && toIdx !== -1) {
+                                    const item = masters.release.splice(fromIdx, 1)[0];
+                                    masters.release.splice(toIdx, 0, item);
+                                    
+                                    // マスタの並び順を保存
+                                    saveMastersOrder('release');
+                                    markUnsaved();
+                                    renderGantt();
+                                }
                             }
                         }
-                        
-                        const draggedRelId = draggedGroup.parentId;
-                        const draggedCharId = draggedGroup.raw.char_id;
-                        
-                        if (targetRelId === draggedRelId && targetCharId && targetCharId !== draggedCharId) {
-                            saveHistory();
+                        // --- キャラクターの入れ替え ---
+                        else if (draggedGroup.type === 'character' || draggedGroup.type === 'lane') {
+                            let targetRelId, targetCharId;
                             
-                            // ガントに表示されているキャラクターの順序を取得
-                            const charGroups = ganttConfig.groups.filter(g => g.type === 'character' && g.parentId === targetRelId);
-                            const charIds = charGroups.map(g => g.raw.char_id);
-                            
-                            const fromIdx = charIds.indexOf(draggedCharId);
-                            let toIdx = charIds.indexOf(targetCharId);
-                            
-                            if (fromIdx !== -1 && toIdx !== -1) {
-                                // ドラッグ方向に応じて挿入位置を調整
-                                if (dragState.initialRowIndex < dragState.targetRowIndex) {
-                                    toIdx = toIdx + 1;
-                                }
-                                
-                                charIds.splice(fromIdx, 1);
-                                if (fromIdx < toIdx) {
-                                    toIdx--;
-                                }
-                                charIds.splice(toIdx, 0, draggedCharId);
-                                
-                                // 新しいキャラ順序に基づいて allTasksRaw を再構築
-                                const newTasks = [];
-                                const targetReleaseTasks = allTasksRaw.filter(t => t.release_id === targetRelId);
-                                const otherTasks = allTasksRaw.filter(t => t.release_id !== targetRelId);
-                                
-                                charIds.forEach(cid => {
-                                    const tasksForChar = targetReleaseTasks.filter(t => t.char_id === cid);
-                                    newTasks.push(...tasksForChar);
-                                });
-                                
-                                const noCharTasks = targetReleaseTasks.filter(t => !charIds.includes(t.char_id));
-                                newTasks.push(...noCharTasks);
-                                
-                                const firstTargetIdx = allTasksRaw.findIndex(t => t.release_id === targetRelId);
-                                if (firstTargetIdx !== -1) {
-                                    const before = allTasksRaw.slice(0, firstTargetIdx).filter(t => t.release_id !== targetRelId);
-                                    const after = allTasksRaw.slice(firstTargetIdx).filter(t => t.release_id !== targetRelId);
-                                    allTasksRaw = [...before, ...newTasks, ...after];
-                                } else {
-                                    allTasksRaw = [...otherTasks, ...newTasks];
+                            if (targetGroup.type === 'character') {
+                                targetRelId = targetGroup.parentId;
+                                targetCharId = targetGroup.raw.char_id;
+                            } else if (targetGroup.type === 'lane') {
+                                const parentCharGroup = ganttConfig.groups.find(g => g.id === targetGroup.parentId);
+                                if (parentCharGroup) {
+                                    targetRelId = parentCharGroup.parentId;
+                                    targetCharId = parentCharGroup.raw.char_id;
                                 }
                             }
                             
-                            markUnsaved();
-                            renderGantt();
-                        } else {
-                            renderGantt();
+                            const draggedRelId = draggedGroup.parentId || (draggedGroup.type === 'lane' ? ganttConfig.groups.find(g=>g.id===draggedGroup.parentId).parentId : null);
+                            const draggedCharId = draggedGroup.raw ? draggedGroup.raw.char_id : null;
+                            
+                            if (targetRelId === draggedRelId && targetCharId && targetCharId !== draggedCharId) {
+                                // ガントに表示されているキャラクターの順序を取得
+                                const charGroups = ganttConfig.groups.filter(g => g.type === 'character' && g.parentId === targetRelId);
+                                const charIds = charGroups.map(g => g.raw.char_id);
+                                
+                                const fromIdx = charIds.indexOf(draggedCharId);
+                                let toIdx = charIds.indexOf(targetCharId);
+                                
+                                if (fromIdx !== -1 && toIdx !== -1) {
+                                    // ドラッグ方向に応じて挿入位置を調整
+                                    if (dragState.initialRowIndex < dragState.targetRowIndex) {
+                                        toIdx = toIdx + 1;
+                                    }
+                                    
+                                    charIds.splice(fromIdx, 1);
+                                    if (fromIdx < toIdx) {
+                                        toIdx--;
+                                    }
+                                    charIds.splice(toIdx, 0, draggedCharId);
+                                    
+                                    // マスタ(masters.character)の順序を更新
+                                    const otherChars = masters.character.filter(c => !charIds.includes(c.char_id));
+                                    const sortedChars = [];
+                                    charIds.forEach(id => {
+                                        const c = masters.character.find(x => x.char_id === id);
+                                        if (c) sortedChars.push(c);
+                                    });
+                                    masters.character = [...sortedChars, ...otherChars];
+                                    
+                                    // マスタの並び順を保存
+                                    saveMastersOrder('character');
+
+                                    // タスクの並び順 (allTasksRaw) も更新する（キャラクターごとのブロックを維持するため）
+                                    const newTasks = [];
+                                    const targetReleaseTasks = allTasksRaw.filter(t => t.release_id === targetRelId);
+                                    const otherTasks = allTasksRaw.filter(t => t.release_id !== targetRelId);
+                                    
+                                    charIds.forEach(cid => {
+                                        const tasksForChar = targetReleaseTasks.filter(t => t.char_id === cid);
+                                        newTasks.push(...tasksForChar);
+                                    });
+                                    
+                                    const noCharTasks = targetReleaseTasks.filter(t => !charIds.includes(t.char_id));
+                                    newTasks.push(...noCharTasks);
+                                    
+                                    const firstTargetIdx = allTasksRaw.findIndex(t => t.release_id === targetRelId);
+                                    if (firstTargetIdx !== -1) {
+                                        const before = allTasksRaw.slice(0, firstTargetIdx).filter(t => t.release_id !== targetRelId);
+                                        const after = allTasksRaw.slice(firstTargetIdx).filter(t => t.release_id !== targetRelId);
+                                        allTasksRaw = [...before, ...newTasks, ...after];
+                                    } else {
+                                        allTasksRaw = [...otherTasks, ...newTasks];
+                                    }
+                                    
+                                    markUnsaved();
+                                    renderGantt();
+                                }
+                            }
                         }
                     } else {
                         renderGantt();
@@ -2574,6 +3012,7 @@ function setupZoom() {
             ganttConfig.rowHeight = 36 * ganttConfig.uiScale;
             document.documentElement.style.setProperty('--ui-scale', ganttConfig.uiScale);
             renderGantt();
+            saveUISettings({ uiScale: ganttConfig.uiScale });
         } else {
             const zoomFactor = e.deltaY < 0 ? 1.2 : 0.8;
             
@@ -2589,6 +3028,7 @@ function setupZoom() {
             // ズーム後も、先ほどと同じ日付が「同じ画面上のX座標」に来るようにスクロール調整
             const newAbsoluteMouseX = dateToX(dateAtMouse);
             els.ganttBody.scrollLeft = newAbsoluteMouseX - mouseXInContainer;
+            saveUISettings({ dayWidth: ganttConfig.dayWidth, scrollLeft: els.ganttBody.scrollLeft });
         }
     }, { passive: false, capture: true });
 }
@@ -2663,12 +3103,31 @@ function openEditor(data, type = 'task') {
         if (!raw) return;
         
         document.getElementById('edit-task-id').value = raw.task_id;
-        document.getElementById('edit-release').value = raw.release_id;
-        document.getElementById('edit-character').value = raw.char_id;
+        
+        // コンボボックスの値と表示名をセット
+        const release = masters.release ? masters.release.find(r => r.release_id === raw.release_id) : null;
+        document.getElementById('edit-release').value = raw.release_id || '';
+        document.getElementById('edit-release-search').value = release ? release.release_name : '';
+        
+        const character = masters.character ? masters.character.find(c => c.char_id === raw.char_id) : null;
+        if (character) {
+            document.getElementById('edit-character-name-search').value = character.char_name;
+            document.getElementById('edit-character-name-hidden').value = character.char_name;
+            
+            // 衣装候補を即座に再構築
+            const costumes = masters.character.filter(c => c.char_name === character.char_name);
+            initComboBox('edit-character-costume-search', 'edit-character-costume-list', 'edit-character', costumes, 'char_id', 'costume_name');
+            
+            document.getElementById('edit-character').value = raw.char_id;
+            document.getElementById('edit-character-costume-search').value = character.costume_name || '';
+        } else {
+            document.getElementById('edit-character-name-search').value = '';
+            document.getElementById('edit-character-name-hidden').value = '';
+            document.getElementById('edit-character-costume-search').value = '';
+            document.getElementById('edit-character').value = '';
+        }
+
         document.getElementById('edit-section').value = raw.section_id;
-        
-        syncCharacterDropdowns(raw.char_id); // エディタを開いた瞬間にキャラと衣装のドロップダウンを同期
-        
         updateEventDisplay(raw.release_id);
         
         document.getElementById('edit-section').dispatchEvent(new Event('change'));
@@ -2690,12 +3149,22 @@ function openEditor(data, type = 'task') {
         if (group.type === 'release') {
             setEditorVisibility('release');
             document.getElementById('edit-release').value = group.raw.release_id;
+            const release = masters.release ? masters.release.find(r => r.release_id === group.raw.release_id) : null;
+            document.getElementById('edit-release-search').value = release ? release.release_name : '';
+
             updateEventDisplay(group.raw.release_id);
             document.getElementById('editor-title').textContent = 'バージョン情報';
         } else if (group.type === 'character') {
             setEditorVisibility('character');
             document.getElementById('edit-release').value = group.parentId;
+            const release = masters.release ? masters.release.find(r => r.release_id === group.parentId) : null;
+            document.getElementById('edit-release-search').value = release ? release.release_name : '';
+
             document.getElementById('edit-character').value = group.raw.char_id;
+            const character = masters.character ? masters.character.find(c => c.char_id === group.raw.char_id) : null;
+            document.getElementById('edit-character-name-search').value = character ? character.char_name : '';
+            document.getElementById('edit-character-costume-search').value = character ? (character.costume_name || '') : '';
+
             updateEventDisplay(group.parentId);
             document.getElementById('editor-title').textContent = 'キャラクター情報';
         }
@@ -2748,15 +3217,35 @@ function openEditorNew(groupId, dateObj) {
     document.getElementById('edit-status').value = '';
     
     document.getElementById('edit-release').value = '';
+    document.getElementById('edit-release-search').value = '';
     document.getElementById('edit-character').value = '';
+    document.getElementById('edit-character-name-search').value = '';
+    document.getElementById('edit-character-name-hidden').value = '';
+    document.getElementById('edit-character-costume-search').value = '';
     updateEventDisplay('');
 
     if (groupId) {
         const parts = groupId.split('_');
         if (parts.length >= 4) {
             const releaseId = parts[0] + '_' + parts[1];
+            const charId = parts[2] + '_' + parts[3];
+            
             document.getElementById('edit-release').value = releaseId;
-            document.getElementById('edit-character').value = parts[2] + '_' + parts[3];
+            const release = masters.release ? masters.release.find(r => r.release_id === releaseId) : null;
+            document.getElementById('edit-release-search').value = release ? release.release_name : '';
+            
+            const character = masters.character ? masters.character.find(c => c.char_id === charId) : null;
+            if (character) {
+                document.getElementById('edit-character-name-search').value = character.char_name;
+                document.getElementById('edit-character-name-hidden').value = character.char_name;
+                
+                const costumes = masters.character.filter(c => c.char_name === character.char_name);
+                initComboBox('edit-character-costume-search', 'edit-character-costume-list', 'edit-character', costumes, 'char_id', 'costume_name');
+                
+                document.getElementById('edit-character').value = charId;
+                document.getElementById('edit-character-costume-search').value = character.costume_name || '';
+            }
+
             updateEventDisplay(releaseId);
         }
     }
@@ -2768,52 +3257,40 @@ function openEditorNew(groupId, dateObj) {
     validateTaskEditor();
 }
 
-function syncCharacterDropdowns(charId) {
-    const nameSel = document.getElementById('edit-character-name');
-    const costumeSel = document.getElementById('edit-character-costume');
-    const hiddenChar = document.getElementById('edit-character');
-    
-    hiddenChar.value = charId || '';
-    if (!charId) {
-        nameSel.value = '';
-        costumeSel.innerHTML = '<option value="">選択してください</option>';
-        return;
-    }
-    
-    const charObj = masters.character.find(c => c.char_id === charId);
-    if (charObj) {
-        nameSel.value = charObj.char_name;
-        const costumes = masters.character.filter(c => c.char_name === charObj.char_name);
-        costumeSel.innerHTML = costumes.map(c => `<option value="${c.char_id}">${c.costume_name || 'デフォルト'}</option>`).join('');
-        costumeSel.value = charId;
-    } else {
-        nameSel.value = '';
-        costumeSel.innerHTML = '<option value="">選択してください</option>';
-    }
-}
-
 function populateDropdowns() {
+    // コンボボックス化しない通常のセレクトボックス
     const renderOptions = (data, idField, nameField, selectId) => {
         const sel = document.getElementById(selectId);
+        if (!sel) return;
         sel.innerHTML = '<option value="">選択してください</option>' + 
             data.map(d => `<option value="${d[idField]}">${d[nameField]}</option>`).join('');
     };
-    renderOptions(masters.release, 'release_id', 'release_name', 'edit-release');
     renderOptions(masters.section, 'section_id', 'section_name', 'edit-section');
     renderOptions(masters.status, 'status_id', 'status_name', 'edit-status');
 
-    const nameSel = document.getElementById('edit-character-name');
-    if (nameSel && masters.character) {
-        const uniqueNames = [...new Set(masters.character.map(c => c.char_name))];
-        nameSel.innerHTML = '<option value="">選択してください</option>' + 
-            uniqueNames.map(n => `<option value="${n}">${n}</option>`).join('');
-        document.getElementById('edit-character-costume').innerHTML = '<option value="">選択してください</option>';
+    // コンボボックス（検索付き）の初期化
+    if (masters.release) {
+        initComboBox('edit-release-search', 'edit-release-list', 'edit-release', masters.release, 'release_id', 'release_name', (id) => {
+            updateEventDisplay(id);
+        });
+    }
+
+    if (masters.character) {
+        const uniqueNames = [...new Set(masters.character.map(c => c.char_name))].map(n => ({ name: n }));
+        initComboBox('edit-character-name-search', 'edit-character-name-list', 'edit-character-name-hidden', uniqueNames, 'name', 'name', (name) => {
+            // キャラクター名が選択されたら、衣装名の候補を更新
+            const costumes = masters.character.filter(c => c.char_name === name);
+            initComboBox('edit-character-costume-search', 'edit-character-costume-list', 'edit-character', costumes, 'char_id', 'costume_name');
+            // 衣装名の検索窓をクリア
+            document.getElementById('edit-character-costume-search').value = '';
+            document.getElementById('edit-character').value = '';
+        });
     }
 }
 
 function setupMiscEvents() {
     // フォームバリデーション用のイベント登録
-    const editFields = ['edit-release', 'edit-character-name', 'edit-character-costume', 'edit-section', 'edit-task-name', 'edit-member', 'edit-start', 'edit-end', 'edit-progress', 'edit-status'];
+    const editFields = ['edit-release', 'edit-character-name-hidden', 'edit-character', 'edit-section', 'edit-task-name', 'edit-member', 'edit-start', 'edit-end', 'edit-progress', 'edit-status'];
     editFields.forEach(id => {
         const el = document.getElementById(id);
         if(el) {
@@ -2822,31 +3299,8 @@ function setupMiscEvents() {
         }
     });
 
-    document.getElementById('edit-character-name').addEventListener('change', (e) => {
-        const selectedName = e.target.value;
-        const costumeSel = document.getElementById('edit-character-costume');
-        const hiddenChar = document.getElementById('edit-character');
-        
-        if (!selectedName) {
-            costumeSel.innerHTML = '<option value="">選択してください</option>';
-            hiddenChar.value = '';
-            return;
-        }
-        
-        const costumes = masters.character.filter(c => c.char_name === selectedName);
-        costumeSel.innerHTML = costumes.map(c => `<option value="${c.char_id}">${c.costume_name || 'デフォルト'}</option>`).join('');
-        hiddenChar.value = costumeSel.value;
-    });
-
-    document.getElementById('edit-character-costume').addEventListener('change', (e) => {
-        document.getElementById('edit-character').value = e.target.value;
-    });
     document.getElementById('btn-close-panel').addEventListener('click', () => {
         document.getElementById('side-panel').classList.add('translate-x-full');
-    });
-
-    document.getElementById('edit-release').addEventListener('change', (e) => {
-        updateEventDisplay(e.target.value);
     });
 
     document.getElementById('edit-section').addEventListener('change', (e) => {
@@ -3925,6 +4379,12 @@ function setupMiscEvents() {
             }
         });
     }
+
+    // ウィンドウを閉じた時にサーバーを即時シャットダウンする（ラグ解消）
+    window.addEventListener('pagehide', () => {
+        // navigator.sendBeacon を使うと、ページが閉じられた後でも確実にリクエストを送信できる
+        navigator.sendBeacon('/api/shutdown');
+    });
     if (btnCloseAiChat) {
         btnCloseAiChat.addEventListener('click', () => {
             aiChatPanel.classList.add('translate-x-full');
@@ -4243,7 +4703,8 @@ function setupMiscEvents() {
         }
     });
 
-    document.getElementById('filter-section').addEventListener('change', () => {
+    document.getElementById('filter-section').addEventListener('change', (e) => {
+        saveUISettings({ filterSection: e.target.value });
         renderGantt();
     });
     
@@ -4338,7 +4799,10 @@ function setupMiscEvents() {
     });
 
     if (els.toggleProgressLine) {
-        els.toggleProgressLine.addEventListener('change', renderProgressLine);
+        els.toggleProgressLine.addEventListener('change', () => {
+            saveUISettings({ toggleProgressLine: els.toggleProgressLine.checked });
+            renderProgressLine();
+        });
     }
 
     // --- エクスポート(CSV/印刷)機能 ---
@@ -4582,11 +5046,22 @@ function setupMiscEvents() {
         const taskEl = e.target.closest('.gantt-task-item');
         
         if (taskEl) {
-            currentTaskContextId = taskEl.getAttribute('data-task-id');
-            document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
-            taskEl.classList.add('selected');
+            const taskId = taskEl.getAttribute('data-task-id');
+            currentTaskContextId = taskId;
+            
+            // もし右クリックしたタスクが選択リストに入っていなければ、それ単一の選択に切り替える
+            if (!selectedTaskIds.has(taskId)) {
+                selectedTaskIds.clear();
+                document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
+                selectedTaskIds.add(taskId);
+                taskEl.classList.add('selected');
+            }
+            // リストに入っている場合は、現在の選択状態（複数選択）を維持する
         } else {
             currentTaskContextId = null;
+            // タスク外を右クリックした場合は選択を解除（任意だが、使い勝手的に解除するのが自然か）
+            // selectedTaskIds.clear();
+            // document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
         }
 
         const rect = els.ganttBodyContent.getBoundingClientRect();
@@ -4594,10 +5069,19 @@ function setupMiscEvents() {
         const mouseY = e.clientY - rect.top;
         
         lastMouseTime = xToDate(mouseX).toDate();
-        const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
         
-        if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-            lastMouseGroup = ganttConfig.groups[rowIndex].id;
+        // 正確な行判定（動的な高さに対応）
+        let hoveredGroup = null;
+        for (let i = 0; i < ganttConfig.groups.length; i++) {
+            const g = ganttConfig.groups[i];
+            if (mouseY >= g.top && mouseY < g.top + g.height) {
+                hoveredGroup = g;
+                break;
+            }
+        }
+
+        if (hoveredGroup) {
+            lastMouseGroup = hoveredGroup.id;
         } else {
             lastMouseGroup = null;
         }
@@ -4637,11 +5121,13 @@ function setupMiscEvents() {
                 // イベントリスナーの登録
                 document.querySelectorAll('.context-status').forEach(el => {
                     el.addEventListener('click', (ev) => {
-                        if (currentTaskContextId) {
+                        if (selectedTaskIds.size > 0) {
                             saveHistory();
                             const statId = ev.currentTarget.getAttribute('data-status-id');
-                            const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
-                            if (t) t.status_id = statId;
+                            selectedTaskIds.forEach(taskId => {
+                                const t = allTasksRaw.find(x => x.task_id === taskId);
+                                if (t) t.status_id = statId;
+                            });
                             markUnsaved();
                             renderGantt();
                             document.getElementById('context-menu').classList.add('hidden');
@@ -4744,11 +5230,13 @@ function setupMiscEvents() {
 
     document.querySelectorAll('.context-progress').forEach(el => {
         el.addEventListener('click', (e) => {
-            if (currentTaskContextId) {
+            if (selectedTaskIds.size > 0) {
                 saveHistory();
                 const prog = e.target.getAttribute('data-progress');
-                const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
-                if (t) t.progress = prog;
+                selectedTaskIds.forEach(taskId => {
+                    const t = allTasksRaw.find(x => x.task_id === taskId);
+                    if (t) t.progress = prog;
+                });
                 markUnsaved();
                 renderGantt();
                 document.getElementById('context-menu').classList.add('hidden');
@@ -4820,25 +5308,41 @@ function pasteTask(targetGroup, targetTime) {
     const group = ganttConfig.groups.find(g => String(g.id) === String(targetGroup));
     console.log("Found matching group for paste:", group);
     if (group) {
-        if (group.type === 'lane') {
-            const charGroup = ganttConfig.groups.find(g => String(g.id) === String(group.parentId));
-            if (charGroup) {
-                newRaw.release_id = String(charGroup.parentId);
-                newRaw.char_id = charGroup.raw ? String(charGroup.raw.char_id) : String(copiedTaskRaw.char_id);
+        if (group.type === 'lane' || group.type === 'character') {
+            if (group.type === 'lane') {
+                const charGroup = ganttConfig.groups.find(g => String(g.id) === String(group.parentId));
+                if (charGroup) {
+                    newRaw.release_id = String(charGroup.parentId);
+                    newRaw.char_id = charGroup.raw ? String(charGroup.raw.char_id) : String(copiedTaskRaw.char_id);
+                } else {
+                    newRaw.char_id = String(copiedTaskRaw.char_id);
+                }
             } else {
-                newRaw.char_id = String(copiedTaskRaw.char_id);
+                newRaw.release_id = String(group.parentId);
+                newRaw.char_id = group.raw ? String(group.raw.char_id) : String(copiedTaskRaw.char_id);
             }
-            // IDの末尾からLANE番号を抽出する (例: "R_001_C_001_LANE2" の末尾の数字)
-            const laneMatch = group.id.match(/_LANE(\d+)$/);
-            newRaw.lane = laneMatch ? String(laneMatch[1]) : '1';
-        } else if (group.type === 'character') {
-            newRaw.release_id = String(group.parentId);
-            newRaw.char_id = group.raw ? String(group.raw.char_id) : String(copiedTaskRaw.char_id);
-            newRaw.lane = '1';
+            
+            // マウス位置の属するキャラクターグループの「一番下」に生成するように、最大のlane番号+1を設定
+            const charTasks = allTasksRaw.filter(t => t.release_id === newRaw.release_id && t.char_id === newRaw.char_id);
+            let maxLane = 0;
+            charTasks.forEach(t => {
+                const l = parseInt(t.lane) || 1;
+                if (l > maxLane) maxLane = l;
+            });
+            newRaw.lane = String(maxLane + 1);
+
         } else if (group.type === 'release') {
             newRaw.release_id = String(group.id);
             newRaw.char_id = String(copiedTaskRaw.char_id); // 幽霊タスク化（表示消滅）を防ぐためにコピー元のキャラクターを維持
-            newRaw.lane = '1';
+            
+            // 指定されたリリースにおける対象キャラクター内の最大レーン+1を設定
+            const charTasks = allTasksRaw.filter(t => t.release_id === newRaw.release_id && t.char_id === newRaw.char_id);
+            let maxLane = 0;
+            charTasks.forEach(t => {
+                const l = parseInt(t.lane) || 1;
+                if (l > maxLane) maxLane = l;
+            });
+            newRaw.lane = String(maxLane + 1);
         }
     } else {
         // フォールバック
