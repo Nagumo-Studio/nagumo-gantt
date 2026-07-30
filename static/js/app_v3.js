@@ -1135,6 +1135,27 @@ function xToDate(x) {
     return ganttConfig.startDate.clone().add(days, 'days');
 }
 
+function calculateBusinessDays(startDate, endDate) {
+    let count = 0;
+    const start = moment(startDate).clone();
+    const end = moment(endDate).clone();
+    
+    if (end.isBefore(start)) {
+        return 0;
+    }
+
+    const masterHolidays = new Set(masters.holiday ? masters.holiday.map(h => h.holiday_date) : []);
+
+    for (let m = start; m.isSameOrBefore(end); m.add(1, 'days')) {
+        const dayOfWeek = m.day();
+        const dateStr = m.format('YYYY-MM-DD');
+        if (dayOfWeek !== 0 && dayOfWeek !== 6 && !masterHolidays.has(dateStr)) {
+            count++;
+        }
+    }
+    return count;
+}
+
 function getMasterItem(type, idField, id) {
     if (!masters[type]) return null;
     const res = masters[type].find(m => String(m[idField]).trim() === String(id).trim());
@@ -2531,6 +2552,10 @@ function setupMouseTracking() {
         
         if (handle) {
             dragState.mode = handle.getAttribute('data-action');
+            if (dragState.mode === 'resize-left' || dragState.mode === 'resize-right') {
+                const businessDays = calculateBusinessDays(taskRaw.start_date, taskRaw.end_date);
+                updateDurationTooltip(e.clientX, e.clientY, `${businessDays} 営業日`, true);
+            }
         } else {
             dragState.mode = 'move';
         }
@@ -2674,7 +2699,15 @@ function setupMouseTracking() {
         } else if (dragState.mode === 'resize-right') {
             const rawWidth = dragState.initialWidth + dx;
             const snappedWidth = Math.max(ganttConfig.dayWidth, Math.round(rawWidth / ganttConfig.dayWidth) * ganttConfig.dayWidth);
-            dragState.element.style.width = `${snappedWidth}px`;
+            const task = allTasksRaw.find(t => t.task_id === dragState.taskId);
+            if (task) {
+                const newEndDate = xToDate(dragState.initialLeft + snappedWidth).subtract(1, 'ms').format('YYYY-MM-DD');
+                if (moment(newEndDate).isSameOrAfter(moment(task.start_date))) {
+                    dragState.element.style.width = `${snappedWidth}px`;
+                    const businessDays = calculateBusinessDays(task.start_date, newEndDate);
+                    updateDurationTooltip(e.clientX, e.clientY, `${businessDays} 営業日`);
+                }
+            }
         } else if (dragState.mode === 'resize-left') {
             const rawLeft = dragState.initialLeft + dx;
             let snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
@@ -2690,8 +2723,14 @@ function setupMouseTracking() {
             const rightEdge = dragState.initialLeft + dragState.initialWidth;
             const snappedWidth = Math.max(ganttConfig.dayWidth, rightEdge - snappedLeft);
             const actualLeft = rightEdge - snappedWidth;
-            dragState.element.style.width = `${snappedWidth}px`;
-            dragState.element.style.left = `${actualLeft}px`;
+            const newStartDate = xToDate(actualLeft).format('YYYY-MM-DD');
+            const task = allTasksRaw.find(t => t.task_id === dragState.taskId);
+            if (task && moment(newStartDate).isSameOrBefore(moment(task.end_date))) {
+                dragState.element.style.width = `${snappedWidth}px`;
+                dragState.element.style.left = `${actualLeft}px`;
+                const businessDays = calculateBusinessDays(newStartDate, task.end_date);
+                updateDurationTooltip(e.clientX, e.clientY, `${businessDays} 営業日`);
+            }
         } else if (dragState.mode === 'connect-dependency') {
             const rect = els.ganttBodyContent.getBoundingClientRect();
             dependencyDragCurrentPos = {
@@ -2721,6 +2760,13 @@ function setupMouseTracking() {
         }
 
         if (!dragState.isDragging) return;
+
+        if (dragState.mode === 'resize-left' || dragState.mode === 'resize-right') {
+            const tooltip = document.getElementById('gantt-duration-tooltip');
+            if (tooltip) {
+                tooltip.remove();
+            }
+        }
 
         if (dragState.mode === 'select-rect') {
             const selRect = document.getElementById('gantt-selection-rect');
@@ -5565,6 +5611,25 @@ function pushSuccessorsRecursive(predecessorId) {
             pushSuccessorsRecursive(succTask.task_id);
         }
     });
+}
+
+function updateDurationTooltip(x, y, text, isInitial = false) {
+    let tooltip = document.getElementById('gantt-duration-tooltip');
+    if (isInitial && !tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'gantt-duration-tooltip';
+        tooltip.className = 'absolute bg-white/70 text-black border border-black text-xs px-2 py-1 rounded shadow-lg pointer-events-none';
+        tooltip.style.zIndex = '10000';
+        document.body.appendChild(tooltip);
+    } else if (!isInitial && !tooltip) {
+        return;
+    }
+    
+    if (tooltip) {
+        tooltip.textContent = text;
+        tooltip.style.left = `${x + 15}px`;
+        tooltip.style.top = `${y + 15}px`;
+    }
 }
 
 init();
