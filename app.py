@@ -58,10 +58,56 @@ def read_csv_as_dicts(filepath):
         return list(reader)
 
 def write_dicts_to_csv(filepath, fieldnames, data):
-    with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(data)
+    """
+    堅牢なファイル書き込み処理:
+    1. 一時ファイルに書き出す
+    2. 書き込み後にOSレベルでフラッシュ(fsync)をかける
+    3. 成功したら既存のファイルを置換する
+    """
+    import tempfile
+    
+    # ディレクトリが存在しない場合は作成
+    dir_path = os.path.dirname(filepath)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    
+    # 元のファイルがあるディレクトリに一時ファイルを作成
+    # delete=False にして手動で管理（Windowsでの差し替え用）
+    temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(filepath), suffix='.tmp')
+    try:
+        with os.fdopen(temp_fd, 'w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
+            f.flush()
+            os.fsync(f.fileno())
+        
+        # Windowsにおいてアトミックな置換は難しいため、古いファイルをリネームしてから新しいファイルを配置する
+        # ファイルが開かれていると失敗する可能性があるが、一時ファイル経由にすることで「中途半端な空ファイル」は防げる
+        if os.path.exists(filepath):
+            backup_path = filepath + '.bak'
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            os.rename(filepath, backup_path)
+            try:
+                os.rename(temp_path, filepath)
+            except Exception as e:
+                # 失敗した場合は元に戻す
+                os.rename(backup_path, filepath)
+                raise e
+            # 成功したらバックアップを消す
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+        else:
+            os.rename(temp_path, filepath)
+            
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+        raise e
 
 import time
 

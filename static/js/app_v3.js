@@ -498,6 +498,7 @@ async function init() {
     await fetchLlmPricing();
     await fetchProjects();
     await reloadData();
+    setupMasterSync();
 
     // 現在のプロジェクト設定を適用
     const pSettings = getCurrentProjectSettings();
@@ -1117,6 +1118,42 @@ function setupScrollSync() {
             ticking = true;
         }
     });
+}
+
+// 他のウィンドウ（マスタエディタ等）での変更を検知するためのポーリング
+function setupMasterSync() {
+    let lastMastersUpdate = Date.now();
+    
+    // 3秒ごとにサーバーのマスタ更新日時（あるいは簡易的に再取得）を確認
+    setInterval(async () => {
+        // ユーザーがツール上で未保存の変更を持っている場合は、勝手に更新するとコンフリクトするので避ける
+        if (hasUnsavedChanges) return;
+
+        try {
+            // マスタの最終更新時間を取得する軽量なAPIがないため、
+            // ひとまずシンプルにフェッチして比較するか、
+            // もしくは再起動なしで反映させたいという要望なので、
+            // 常に最新を維持するように試みる（ただし、編集中の場合は邪魔しない）
+            
+            // タスクエディタが開いている間も更新は控える
+            if (document.getElementById('task-editor') && !document.getElementById('task-editor').classList.contains('hidden')) return;
+
+            // reloadDataを呼ぶと全描画が走るので、マスタだけを更新して
+            // 変更があった場合のみ再描画する
+            const res = await fetch(`/api/masters?project=${currentProject}&_ts=${Date.now()}`);
+            const newMasters = await res.json();
+            
+            // 簡易的な比較（文字列表現で比較）
+            if (JSON.stringify(newMasters) !== JSON.stringify(masters)) {
+                console.log("Masters updated on server. Reloading data...");
+                masters = newMasters;
+                // マスタに依存するUIパーツ（フィルター等）も更新が必要
+                await reloadData();
+            }
+        } catch (e) {
+            // ignore
+        }
+    }, 5000); // 5秒おきにチェック
 }
 
 function scrollToDate(dateMoment) {
