@@ -474,10 +474,17 @@
             
             <div class="border-t my-1 menu-item ctx-separator-2"></div>
             
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-task" id="ctx-create-annotation">選択タスクを囲む枠を作成</div>
+            
+            <div class="border-t my-1 menu-item ctx-separator-annotation hidden" id="ctx-sep-annotation"></div>
+            <div class="px-4 py-2 hover:bg-red-100 cursor-pointer font-bold text-red-600 menu-item hidden" id="ctx-delete-annotation">この枠を削除</div>
+
+            <div class="border-t my-1 menu-item ctx-separator-3"></div>
+            
             <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-task" id="ctx-copy">コピー (Ctrl+C)</div>
             <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-empty" id="ctx-paste">ペースト (Ctrl+V)</div>
             
-            <div class="border-t my-1 menu-item ctx-separator-3"></div>
+            <div class="border-t my-1 menu-item ctx-separator-4"></div>
             
             <div class="px-4 py-2 hover:bg-red-100 cursor-pointer font-bold text-red-600 menu-item ctx-item-task" id="ctx-delete">削除 (Delete)</div>
         </div>
@@ -511,5 +518,8 @@
         script.src = "{{ url_for('static', filename='js/app_v3.js') }}?v=" + new Date().getTime();
         document.body.appendChild(script);
     </script>
+
+    <!-- Hidden global color picker for annotations -->
+    <input type="color" id="global-color-picker" class="hidden">
 </body>
 </html>

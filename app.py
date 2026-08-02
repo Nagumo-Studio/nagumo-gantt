@@ -1,11 +1,15 @@
 import os
 import sys
 import csv
-import glob
+import json
 import logging
-from flask import Flask, render_template, jsonify, request, make_response
+import time
+import urllib.request
+import urllib.error
+import tempfile
+from flask import Flask, render_template, jsonify, request
 
-# pythonw.exe での起動時に標準出力・エラー出力を無効化（エラー防止）
+# pythonw.exe での起動時に標準出力・エラー出力を無効化
 if sys.executable.endswith("pythonw.exe"):
     sys.stdout = open(os.devnull, "w")
     sys.stderr = open(os.devnull, "w")
@@ -17,14 +21,7 @@ if getattr(sys, 'frozen', False):
 else:
     app = Flask(__name__)
 
-import logging
-log = logging.getLogger('werkzeug')
-class HeartbeatFilter(logging.Filter):
-    def filter(self, record):
-        return "/api/heartbeat" not in record.getMessage()
-log.addFilter(HeartbeatFilter())
-
-# ブラウザキャッシュを完全に無効化する
+# ブラウザキャッシュ無効化
 @app.after_request
 def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -32,7 +29,6 @@ def add_header(response):
     response.headers['Expires'] = '-1'
     return response
 
-# EXE化を考慮したベースディレクトリ取得
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
@@ -43,80 +39,23 @@ PROJECTS_DIR = os.path.join(DATA_DIR, 'projects')
 COMMON_DIR = os.path.join(DATA_DIR, 'common')
 
 def get_project_dir(project_name):
-    if not project_name:
-        project_name = 'Sample'
+    project_name = project_name or 'Sample'
     p_dir = os.path.join(PROJECTS_DIR, project_name)
-    if not os.path.exists(p_dir):
-        os.makedirs(p_dir, exist_ok=True)
+    os.makedirs(p_dir, exist_ok=True)
     return p_dir
 
 def read_csv_as_dicts(filepath):
-    if not os.path.exists(filepath):
-        return []
+    if not os.path.exists(filepath): return []
     with open(filepath, 'r', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        return list(reader)
+        return list(csv.DictReader(f))
 
 def write_dicts_to_csv(filepath, fieldnames, data):
-    """
-    堅牢なファイル書き込み処理:
-    1. 一時ファイルに書き出す
-    2. 書き込み後にOSレベルでフラッシュ(fsync)をかける
-    3. 成功したら既存のファイルを置換する
-    """
-    import tempfile
-    
-    # ディレクトリが存在しない場合は作成
     dir_path = os.path.dirname(filepath)
-    if dir_path:
-        os.makedirs(dir_path, exist_ok=True)
-    
-    # 元のファイルがあるディレクトリに一時ファイルを作成
-    # delete=False にして手動で管理（Windowsでの差し替え用）
-    temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(filepath), suffix='.tmp')
-    try:
-        with os.fdopen(temp_fd, 'w', encoding='utf-8-sig', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(data)
-            f.flush()
-            os.fsync(f.fileno())
-        
-        # Windowsにおいてアトミックな置換は難しいため、古いファイルをリネームしてから新しいファイルを配置する
-        # ファイルが開かれていると失敗する可能性があるが、一時ファイル経由にすることで「中途半端な空ファイル」は防げる
-        if os.path.exists(filepath):
-            backup_path = filepath + '.bak'
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
-            os.rename(filepath, backup_path)
-            try:
-                os.rename(temp_path, filepath)
-            except Exception as e:
-                # 失敗した場合は元に戻す
-                os.rename(backup_path, filepath)
-                raise e
-            # 成功したらバックアップを消す
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
-        else:
-            os.rename(temp_path, filepath)
-            
-    except Exception as e:
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except:
-                pass
-        raise e
-
-import time
-
-@app.after_request
-def add_header(response):
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '-1'
-    return response
+    if dir_path: os.makedirs(dir_path, exist_ok=True)
+    with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(data)
 
 @app.route('/')
 def index():
@@ -125,104 +64,25 @@ def index():
     if os.path.exists(prompt_path):
         with open(prompt_path, 'r', encoding='utf-8') as f:
             default_prompt = f.read()
-    else:
-        default_prompt = """あなたは優秀なプロジェクト管理アシスタントです。
-アジャイル開発やウォーターフォール開発の手法に精通しており、PMBOKの知識（スコープ管理、スケジュール管理、リソース管理、リスク管理など）を深く理解しています。プロジェクトマネジメントのプロフェッショナルとして、論理的かつ実践的な視点からアドバイスを行います。
-
-ユーザーからスケジュールの調整・変更・提案を求められた場合は、プロジェクトマネジメントのベストプラクティスに基づいた日本語の解説文とともに、変更後のスケジュールデータを以下のJSON形式のコードブロック（ ```json ... ``` ）で「必ず」出力してください。
-
-[出力形式]
-```json
-[
-  {
-    "id": "タスクID（例: TSK_00001）",
-    "start": "新しい開始日（YYYY-MM-DD）",
-    "end": "新しい終了日（YYYY-MM-DD）"
-  }
-]
-```"""
-        # ファイルが存在しない場合は作成しておく
-        os.makedirs(COMMON_DIR, exist_ok=True)
-        with open(prompt_path, 'w', encoding='utf-8') as f:
-            f.write(default_prompt)
-
     return render_template('index.html', ts=int(time.time()), default_system_prompt=default_prompt)
 
 @app.route('/master_editor')
 def master_editor():
     return render_template('master_editor.html', ts=int(time.time()))
 
-@app.route('/api/log', methods=['POST'])
-def receive_log():
-    data = request.get_json()
-    if data:
-        print(f"\n============================\n[JS {data.get('type', 'INFO')}] {data.get('message', '')}\n============================\n")
-    return jsonify({"status": "ok"})
-
-# ハートビート時刻をファイルで共有・保持する（マルチプロセス/Debugモード対応）
-HEARTBEAT_FILE = os.path.join(DATA_DIR, 'heartbeat.txt')
-
 @app.route('/api/heartbeat', methods=['POST'])
 def heartbeat():
-    try:
-        # dataディレクトリがない場合は作成
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(HEARTBEAT_FILE, 'w', encoding='utf-8') as f:
-            f.write(str(time.time()))
-    except Exception as e:
-        print("Heartbeat write error:", e)
-    return jsonify({"status": "ok"})
-
-@app.route('/api/restart', methods=['POST'])
-def restart_server():
-    print("Restart requested. Exiting current process...")
-    if os.path.exists('WBSツール起動.bat'):
-        # startコマンドで新しいウィンドウを開く
-        os.system('start "" "WBSツール起動.bat"')
-    # 自プロセスを終了（コマンドプロンプトも連動して閉じる）
-    os._exit(0)
-    return jsonify({"status": "ok"})
-
-@app.route('/api/shutdown', methods=['POST'])
-def shutdown_server_api():
-    print("\n========================================================")
-    print("Browser closed. Shutting down Flask server and CMD...")
-    print("========================================================\n")
-    os._exit(0)
     return jsonify({"status": "ok"})
 
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
-    if not os.path.exists(PROJECTS_DIR):
-        os.makedirs(os.path.join(PROJECTS_DIR, 'Sample'), exist_ok=True)
-    projects = [d for d in os.listdir(PROJECTS_DIR) if os.path.isdir(os.path.join(PROJECTS_DIR, d))]
-    if not projects:
-        projects = ['Sample']
-    return jsonify(projects)
-
-@app.route('/api/projects/delete', methods=['POST'])
-def delete_project():
-    try:
-        import shutil
-        project_name = request.json.get('project')
-        if not project_name:
-            return jsonify({'status': 'error', 'message': 'Project name is required'}), 400
-        if project_name == 'Sample':
-            return jsonify({'status': 'error', 'message': 'Sampleプロジェクトは削除できません'}), 400
-        p_dir = get_project_dir(project_name)
-        if os.path.exists(p_dir):
-            shutil.rmtree(p_dir)
-            return jsonify({'status': 'success'})
-        else:
-            return jsonify({'status': 'error', 'message': 'Project not found'}), 404
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    if not os.path.exists(PROJECTS_DIR): os.makedirs(os.path.join(PROJECTS_DIR, 'Sample'), exist_ok=True)
+    return jsonify([d for d in os.listdir(PROJECTS_DIR) if os.path.isdir(os.path.join(PROJECTS_DIR, d))] or ['Sample'])
 
 @app.route('/api/masters', methods=['GET'])
 def get_masters():
-    project_name = request.args.get('project', 'Sample')
-    p_dir = get_project_dir(project_name)
-    masters = {
+    p_dir = get_project_dir(request.args.get('project', 'Sample'))
+    return jsonify({
         'release': read_csv_as_dicts(os.path.join(p_dir, 'm_release.csv')),
         'character': read_csv_as_dicts(os.path.join(p_dir, 'm_character.csv')),
         'section': read_csv_as_dicts(os.path.join(p_dir, 'm_section.csv')),
@@ -230,82 +90,70 @@ def get_masters():
         'status': read_csv_as_dicts(os.path.join(p_dir, 'm_status.csv')),
         'task_template': read_csv_as_dicts(os.path.join(p_dir, 'm_task_template.csv')),
         'holiday': read_csv_as_dicts(os.path.join(p_dir, 'm_holiday.csv'))
-    }
-    return jsonify(masters)
+    })
 
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
-    project_name = request.args.get('project', 'Sample')
-    p_dir = get_project_dir(project_name)
-    print(f"DEBUG: p_dir={p_dir}")
+    p_dir = get_project_dir(request.args.get('project', 'Sample'))
     tasks = []
-    # EXE化環境でのglobバグを回避するため、os.listdirで手動抽出
-    try:
-        files = os.listdir(p_dir)
-        task_files = [os.path.join(p_dir, f) for f in files if f.startswith('t_tasks_') and f.endswith('.csv')]
-    except Exception as e:
-        print(f"DEBUG: Error reading directory: {e}")
-        task_files = []
-        
-    print(f"DEBUG: task_files={task_files}")
-    for f in task_files:
+    for f in [os.path.join(p_dir, x) for x in os.listdir(p_dir) if x.startswith('t_tasks_') and x.endswith('.csv')]:
         tasks.extend(read_csv_as_dicts(f))
     return jsonify(tasks)
 
 @app.route('/api/tasks/save', methods=['POST'])
 def save_tasks():
     try:
-        project_name = request.args.get('project', 'Sample')
-        p_dir = get_project_dir(project_name)
+        p_dir = get_project_dir(request.args.get('project', 'Sample'))
         data = request.json
-        # セクションごとにデータを分けて保存
+        fieldnames = ['task_id', 'release_id', 'char_id', 'section_id', 'task_name', 'member_id', 'start_date', 'end_date', 'progress', 'lane', 'dependencies', 'status_id']
         tasks_by_section = {}
         for task in data:
+            for field in fieldnames:
+                if field not in task: task[field] = ''
             sec_id = task.get('section_id')
-            if sec_id not in tasks_by_section:
-                tasks_by_section[sec_id] = []
+            if sec_id not in tasks_by_section: tasks_by_section[sec_id] = []
             tasks_by_section[sec_id].append(task)
-        
-        # 既存 of タスクCSVをクリアするか上書きする処理
-        # ここでは受け取ったデータをS_xxx別に分けて t_tasks_xxx.csv に上書きする
-        # （簡易的に section_id をそのままファイル名に利用）
-        fieldnames = ['task_id', 'release_id', 'char_id', 'section_id', 'task_name', 'member_id', 'start_date', 'end_date', 'progress', 'lane', 'dependencies', 'status_id']
         for sec_id, tasks in tasks_by_section.items():
-            filepath = os.path.join(p_dir, f't_tasks_{sec_id}.csv')
-            write_dicts_to_csv(filepath, fieldnames, tasks)
-            
+            write_dicts_to_csv(os.path.join(p_dir, f't_tasks_{sec_id}.csv'), fieldnames, tasks)
         return jsonify({'status': 'success'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    except Exception as e: return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/deadlines', methods=['GET'])
 def get_deadlines():
-    project_name = request.args.get('project', 'Sample')
-    p_dir = get_project_dir(project_name)
-    filepath = os.path.join(p_dir, 't_section_deadlines.csv')
-    deadlines = read_csv_as_dicts(filepath)
-    return jsonify(deadlines)
+    p_dir = get_project_dir(request.args.get('project', 'Sample'))
+    return jsonify(read_csv_as_dicts(os.path.join(p_dir, 't_section_deadlines.csv')))
 
 @app.route('/api/deadlines/save', methods=['POST'])
 def save_deadlines():
     try:
-        project_name = request.args.get('project', 'Sample')
-        p_dir = get_project_dir(project_name)
-        data = request.json
-        filepath = os.path.join(p_dir, 't_section_deadlines.csv')
-        fieldnames = ['release_id', 'char_id', 'section_id', 'deadline_date']
-        write_dicts_to_csv(filepath, fieldnames, data)
+        p_dir = get_project_dir(request.args.get('project', 'Sample'))
+        write_dicts_to_csv(os.path.join(p_dir, 't_section_deadlines.csv'), ['release_id', 'char_id', 'section_id', 'deadline_date'], request.json)
         return jsonify({'status': 'success'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    except Exception as e: return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/annotations', methods=['GET'])
+def get_annotations():
+    p_dir = get_project_dir(request.args.get('project', 'Sample'))
+    return jsonify(read_csv_as_dicts(os.path.join(p_dir, 't_annotations.csv')))
+
+@app.route('/api/annotations/save', methods=['POST'])
+def save_annotations():
+    try:
+        p_dir = get_project_dir(request.args.get('project', 'Sample'))
+        data = request.json
+        fieldnames = ['id', 'release_id', 'start_date', 'end_date', 'start_lane_id', 'end_lane_id', 'color', 'border_width', 'comment', 'position']
+        for row in data:
+            for field in fieldnames:
+                if field not in row: row[field] = ''
+        write_dicts_to_csv(os.path.join(p_dir, 't_annotations.csv'), fieldnames, data)
+        return jsonify({'status': 'success'})
+    except Exception as e: return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/masters/save', methods=['POST'])
 def save_masters():
     try:
-        project_name = request.args.get('project', 'Sample')
-        p_dir = get_project_dir(project_name)
+        p_dir = get_project_dir(request.args.get('project', 'Sample'))
         data = request.json
-        # data = { 'release': [...], 'character': [...], ... }
         master_files = {
             'release': ('m_release.csv', ['release_id', 'release_name', 'art_deadline', 'branch_deadline', 'release_date', 'event_name']),
             'character': ('m_character.csv', ['char_id', 'char_name', 'costume_name', 'category', 'usage', 'event_id']),
@@ -315,425 +163,65 @@ def save_masters():
             'task_template': ('m_task_template.csv', ['template_id', 'section_id', 'task_name', 'default_days']),
             'holiday': ('m_holiday.csv', ['holiday_date', 'holiday_name', 'holiday_type'])
         }
-        for key, records in data.items():
-            if key in master_files:
-                filename, fieldnames = master_files[key]
-                filepath = os.path.join(p_dir, filename)
-                write_dicts_to_csv(filepath, fieldnames, records)
+        
+        # 単一マスタ形式 { master_type: 'xxx', data: [...] } に対応
+        if isinstance(data, dict) and 'master_type' in data and 'data' in data:
+            m_type = data['master_type']
+            if m_type in master_files:
+                fn, flds = master_files[m_type]
+                write_dicts_to_csv(os.path.join(p_dir, fn), flds, data['data'])
+                return jsonify({'status': 'success'})
+        
+        # 複数マスタ一括形式 { 'release': [...], 'character': [...] } に対応
+        if isinstance(data, dict):
+            for key, records in data.items():
+                if key in master_files:
+                    fn, flds = master_files[key]
+                    write_dicts_to_csv(os.path.join(p_dir, fn), flds, records)
         return jsonify({'status': 'success'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    except Exception as e: return jsonify({'status': 'error', 'message': str(e)}), 500
 
-SETTINGS_FILE = os.path.join(COMMON_DIR, 'user_settings.json')
-
-@app.route('/api/settings', methods=['GET'])
-def get_settings():
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-            try:
-                return jsonify(json.load(f))
-            except:
-                return jsonify({})
-    return jsonify({})
-
-@app.route('/api/settings', methods=['POST'])
-def save_settings():
-    try:
+@app.route('/api/settings', methods=['GET', 'POST'])
+def settings_api():
+    filepath = os.path.join(COMMON_DIR, 'user_settings.json')
+    if request.method == 'GET':
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f: return jsonify(json.load(f))
+        return jsonify({})
+    else:
         data = request.json
         existing = {}
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                try:
-                    existing = json.load(f)
-                except:
-                    pass
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                try: existing = json.load(f)
+                except: pass
         existing.update(data)
         os.makedirs(COMMON_DIR, exist_ok=True)
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
+        with open(filepath, 'w', encoding='utf-8') as f: json.dump(existing, f, ensure_ascii=False, indent=2)
         return jsonify({'status': 'success'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-# ==========================================
-# AI Assistant API Proxy
-# ==========================================
-import urllib.request
-import json
-import urllib.error
+@app.route('/api/restart', methods=['POST'])
+def restart_server():
+    if os.path.exists('WBSツール起動.bat'): os.system('start "" "WBSツール起動.bat"')
+    os._exit(0)
+    return jsonify({"status": "ok"})
 
-@app.route('/api/llm/models', methods=['POST'])
-def get_llm_models():
-    data = request.json
-    provider = data.get('provider')
-    api_key = data.get('apiKey')
-    if not api_key:
-        return jsonify({"status": "error", "message": "APIキーが設定されていません。"}), 400
-
-    models = []
-    try:
-        if provider == 'openai':
-            req = urllib.request.Request("https://api.openai.com/v1/models")
-            req.add_header("Authorization", f"Bearer {api_key}")
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                models = [m['id'] for m in res_data.get('data', []) if m['id'].startswith('gpt-')]
-        elif provider == 'gemini':
-            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                models = [m['name'].replace('models/', '') for m in res_data.get('models', []) if 'generateContent' in m.get('supportedGenerationMethods', [])]
-        elif provider == 'claude':
-            req = urllib.request.Request("https://api.anthropic.com/v1/models")
-            req.add_header("x-api-key", api_key)
-            req.add_header("anthropic-version", "2023-06-01")
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                models = [m['id'] for m in res_data.get('data', []) if m.get('type') == 'model']
-        else:
-            return jsonify({"status": "error", "message": "このプロバイダは動的取得に対応していません。"}), 400
-            
-    except urllib.error.HTTPError as e:
-        error_msg = e.read().decode('utf-8')
-        return jsonify({"status": "error", "message": f"APIエラー ({e.code}): {error_msg}"}), 400
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-    models.sort(reverse=True) # 新しいモデルが上に来るように簡易ソート
-
-    # 動的取得したモデル一覧と既存のCSV価格マスタを比較し、未知のモデルがあれば単価 0.0 として自動追記
-    try:
-        import csv
-        import os
-        csv_path = os.path.join("data", "common", "m_llm_pricing.csv")
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        existing_models = set()
-        rows = []
-        fieldnames = ["model_name", "input_cost_1m", "output_cost_1m", "provider"]
-        if os.path.exists(csv_path):
-            with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
-                reader = csv.DictReader(f)
-                if reader.fieldnames:
-                    fieldnames = reader.fieldnames
-                for row in reader:
-                    existing_models.add(row.get("model_name", "").strip())
-                    rows.append(row)
-        
-        added_new = False
-        provider_name_map = {'openai': 'OpenAI', 'claude': 'Anthropic', 'gemini': 'Google'}
-        provider_name = provider_name_map.get(provider, 'Unknown')
-        
-        for m in models:
-            if m not in existing_models:
-                rows.append({
-                    "model_name": m,
-                    "input_cost_1m": "0.0",
-                    "output_cost_1m": "0.0",
-                    "provider": provider_name
-                })
-                added_new = True
-                
-        if added_new:
-            with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
-    except Exception as e:
-        print(f"価格マスタの自動更新に失敗しました: {e}")
-
-    return jsonify({"status": "success", "models": models})
-
-DEFAULT_PRICING = [
-    # model_name, input_cost_1m, output_cost_1m, provider
-    ("USD_JPY", 155.00, 155.00, "SYSTEM"),
-    # ※モデルの追加・編集は data/common/m_llm_pricing.csv を直接編集してください
-]
-
-PRICING_CSV_PATH = os.path.join("data", "common", "m_llm_pricing.csv")
+@app.route('/api/shutdown', methods=['POST'])
+def shutdown():
+    os._exit(0)
+    return jsonify({"status": "ok"})
 
 @app.route('/api/llm/pricing', methods=['GET'])
-def get_llm_pricing():
-    import csv
-    os.makedirs(os.path.dirname(PRICING_CSV_PATH), exist_ok=True)
-    
-    if not os.path.exists(PRICING_CSV_PATH):
-        try:
-            with open(PRICING_CSV_PATH, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f)
-                writer.writerow(["model_name", "input_cost_1m", "output_cost_1m", "provider"])
-                for row in DEFAULT_PRICING:
-                    writer.writerow(row)
-        except Exception as e:
-            return jsonify({"status": "error", "message": f"デフォルト価格表の作成に失敗しました: {str(e)}"}), 500
-
-    pricing_list = []
-    try:
-        with open(PRICING_CSV_PATH, "r", newline="", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    pricing_list.append({
-                        "model_name": row["model_name"].strip(),
-                        "input_cost_1m": float(row["input_cost_1m"]),
-                        "output_cost_1m": float(row["output_cost_1m"]),
-                        "provider": row["provider"].strip()
-                    })
-                except (ValueError, KeyError):
-                    continue
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"価格表の読み込みに失敗しました: {str(e)}"}), 500
-
-    return jsonify({"status": "success", "pricing": pricing_list})
-
-@app.route('/api/llm/chat', methods=['POST'])
-def ai_chat_proxy():
-    data = request.json
-    provider = data.get('provider')
-    api_key = data.get('apiKey')
-    model = data.get('model')
-    messages = data.get('messages', [])
-    system_prompt = data.get('systemPrompt', '')
-    temperature = data.get('temperature', 0.7)
-    images = data.get('images', []) # list of base64 strings like 'data:image/png;base64,...'
-
-    if not api_key or not model:
-        return jsonify({"status": "error", "message": "APIキーとモデルが正しく設定されていません。"}), 400
-
-    try:
-        reply_text = ""
-        total_tokens = 0
-        input_tokens = 0
-        output_tokens = 0
-
-        if provider == 'openai':
-            reply_text, input_tokens, output_tokens, total_tokens = _handle_openai_chat(
-                model, messages, system_prompt, temperature, images, api_key)
-        elif provider == 'claude':
-            reply_text, input_tokens, output_tokens, total_tokens = _handle_claude_chat(
-                model, messages, system_prompt, temperature, images, api_key)
-        elif provider == 'gemini':
-            reply_text, input_tokens, output_tokens, total_tokens = _handle_gemini_chat(
-                model, messages, system_prompt, temperature, images, api_key)
-        else:
-            return jsonify({"status": "error", "message": f"不明なプロバイダです: {provider}"}), 400
-        return jsonify({
-            "status": "success",
-            "reply": reply_text,
-            "tokens": total_tokens,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens
-        })
-        
-    except urllib.error.HTTPError as e:
-        error_msg = e.read().decode('utf-8')
-        return jsonify({"status": "error", "message": f"APIエラー ({e.code}): {error_msg}"}), 400
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-
-# --- LLM Provider Handlers ---
-
-def _get_last_user_msg_idx(msgs):
-    for i in range(len(msgs)-1, -1, -1):
-        if msgs[i]['role'] == 'user':
-            return i
-    return -1
-
-def _handle_openai_chat(model, messages, system_prompt, temperature, images, api_key):
-    import urllib.request, json
-    api_url = "https://api.openai.com/v1/chat/completions"
-    payload_messages = []
-    if system_prompt:
-        payload_messages.append({"role": "system", "content": system_prompt})
-    
-    cloned_messages = [dict(m) for m in messages]
-    if images:
-        last_idx = _get_last_user_msg_idx(cloned_messages)
-        if last_idx != -1:
-            original_content = cloned_messages[last_idx]['content']
-            new_content = [{"type": "text", "text": original_content}]
-            for img in images:
-                new_content.append({"type": "image_url", "image_url": {"url": img}})
-            cloned_messages[last_idx]['content'] = new_content
-            
-    payload_messages.extend(cloned_messages)
-    payload = {
-        "model": model,
-        "messages": payload_messages,
-        "temperature": temperature
-    }
-    
-    req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    
-    with urllib.request.urlopen(req) as response:
-        res_data = json.loads(response.read().decode('utf-8'))
-        reply_text = res_data['choices'][0]['message']['content']
-        total_tokens = res_data.get('usage', {}).get('total_tokens', 0)
-        input_tokens = res_data.get('usage', {}).get('prompt_tokens', 0)
-        output_tokens = res_data.get('usage', {}).get('completion_tokens', 0)
-    return reply_text, input_tokens, output_tokens, total_tokens
-
-def _handle_claude_chat(model, messages, system_prompt, temperature, images, api_key):
-    import urllib.request, json
-    api_url = "https://api.anthropic.com/v1/messages"
-    cloned_messages = [dict(m) for m in messages]
-    
-    if images:
-        last_idx = _get_last_user_msg_idx(cloned_messages)
-        if last_idx != -1:
-            original_content = cloned_messages[last_idx]['content']
-            new_content = [{"type": "text", "text": original_content}]
-            for img in images:
-                if ',' in img:
-                    header, b64data = img.split(',', 1)
-                    media_type = header.split(':')[1].split(';')[0]
-                    new_content.append({
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": b64data
-                        }
-                    })
-            cloned_messages[last_idx]['content'] = new_content
-            
-    payload = {
-        "model": model,
-        "max_tokens": 4096,
-        "temperature": temperature,
-        "messages": cloned_messages
-    }
-    if system_prompt:
-        payload["system"] = system_prompt
-        
-    req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
-    req.add_header("x-api-key", api_key)
-    req.add_header("anthropic-version", "2023-06-01")
-    req.add_header("Content-Type", "application/json")
-    
-    with urllib.request.urlopen(req) as response:
-        res_data = json.loads(response.read().decode('utf-8'))
-        reply_text = res_data['content'][0]['text']
-        input_tokens = res_data.get('usage', {}).get('input_tokens', 0)
-        output_tokens = res_data.get('usage', {}).get('output_tokens', 0)
-        total_tokens = input_tokens + output_tokens
-    return reply_text, input_tokens, output_tokens, total_tokens
-
-def _handle_gemini_chat(model, messages, system_prompt, temperature, images, api_key):
-    import urllib.request, json
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    gemini_messages = []
-    
-    last_user_idx = _get_last_user_msg_idx(messages)
-    
-    for idx, msg in enumerate(messages):
-        parts = [{"text": msg['content']}]
-        
-        if idx == last_user_idx and images:
-            for img in images:
-                if ',' in img:
-                    header, b64data = img.split(',', 1)
-                    mime_type = header.split(':')[1].split(';')[0]
-                    parts.append({
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": b64data
-                        }
-                    })
-
-        gemini_messages.append({
-            "role": "user" if msg['role'] == "user" else "model",
-            "parts": parts
-        })
-        
-    payload = {
-        "contents": gemini_messages,
-        "generationConfig": {
-            "temperature": temperature
-        }
-    }
-    if system_prompt:
-        payload["systemInstruction"] = {
-            "parts": [{"text": system_prompt}]
-        }
-
-    req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
-    req.add_header("Content-Type", "application/json")
-    
-    with urllib.request.urlopen(req) as response:
-        res_data = json.loads(response.read().decode('utf-8'))
-        reply_text = res_data['candidates'][0]['content']['parts'][0]['text']
-        input_tokens = res_data.get('usageMetadata', {}).get('promptTokenCount', 0)
-        output_tokens = res_data.get('usageMetadata', {}).get('candidatesTokenCount', 0)
-        total_tokens = res_data.get('usageMetadata', {}).get('totalTokenCount', 0)
-    return reply_text, input_tokens, output_tokens, total_tokens
-
+def get_pricing():
+    filepath = os.path.join(COMMON_DIR, 'm_llm_pricing.csv')
+    return jsonify({"status": "success", "pricing": read_csv_as_dicts(filepath)})
 
 if __name__ == '__main__':
-    import threading
-    import webbrowser
-    import time
-    import subprocess
-    import sys
-
-    # 新しいポート番号（以前のゾンビプロセスを完全に回避するため5004に変更）
-    PORT = 5004
-
-    def open_browser():
-        time.sleep(1.5)
-        url = f'http://127.0.0.1:{PORT}/'
-        try:
-            # Chromeを強制的に開く試み
-            chrome_path_64 = 'C:/Program Files/Google/Chrome/Application/chrome.exe %s'
-            chrome_path_32 = 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe %s'
-            
-            if os.path.exists('C:/Program Files/Google/Chrome/Application/chrome.exe'):
-                webbrowser.get(chrome_path_64).open(url)
-            elif os.path.exists('C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'):
-                webbrowser.get(chrome_path_32).open(url)
-            else:
-                webbrowser.open(url)
-        except Exception:
-            webbrowser.open(url)
-        
-    def check_heartbeat():
-        # 初回起動時にハートビートファイルを作成・初期化
-        os.makedirs(DATA_DIR, exist_ok=True)
-        h_file = os.path.join(DATA_DIR, 'heartbeat.txt')
-        with open(h_file, 'w', encoding='utf-8') as f:
-            f.write(str(time.time()))
-
-        time.sleep(15)  # 初回起動時の猶予
-        while True:
-            time.sleep(3)
-            try:
-                if os.path.exists(h_file):
-                    with open(h_file, 'r', encoding='utf-8') as f:
-                        val = float(f.read().strip())
-                    # 5秒以上ハートビートファイルが更新されていなければ終了
-                    if time.time() - val > 5:
-                        print("Browser closed. Exiting server...")
-                        os._exit(0)
-                else:
-                    # ファイルが消された場合も終了
-                    print("Heartbeat file missing. Exiting server...")
-                    os._exit(0)
-            except Exception as e:
-                # 読み込み中の一時的な競合等はスキップ
-                pass
-
+    PORT = 55555
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
+        import threading, webbrowser
+        def open_browser():
+            time.sleep(1.5)
+            webbrowser.open(f'http://127.0.0.1:{PORT}/')
         threading.Thread(target=open_browser, daemon=True).start()
-    
-    # 親・子プロセスを問わずすべてのプロセスでハートビート監視を起動
-    # これにより、ブラウザが閉じられた際に確実に自滅終了（exit）できるようになります
-    threading.Thread(target=check_heartbeat, daemon=True).start()
-
-    if getattr(sys, 'frozen', False):
-        app.run(debug=False, port=PORT)
-    else:
-        app.run(debug=True, port=PORT)
+    app.run(host='127.0.0.1', port=PORT, debug=True, use_reloader=False, threaded=True)

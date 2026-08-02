@@ -316,3 +316,115 @@ body, html {
     stroke: #ef4444 !important;
     stroke-width: 4px !important;
 }
+
+/* アノテーション（矩形注釈） */
+.gantt-annotation-rect {
+    position: absolute;
+    pointer-events: none;
+    z-index: 200;
+    transition: box-shadow 0.2s;
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    border-radius: 6px;
+}
+/* 当たり判定用ハンドル */
+.gantt-annotation-handle {
+    position: absolute;
+    pointer-events: auto;
+    background: rgba(255, 0, 0, 0.05); /* 掴める場所をうっすら可視化 */
+    z-index: 205;
+}
+.gantt-annotation-handle:hover {
+    background: rgba(255, 0, 0, 0.2);
+}
+/* 四辺のハンドル：移動用（厚み20px） */
+.gantt-annotation-handle-top    { top: -10px; left: 20px; right: 20px; height: 20px; cursor: move; }
+.gantt-annotation-handle-bottom { bottom: -10px; left: 20px; right: 20px; height: 20px; cursor: move; }
+.gantt-annotation-handle-left   { top: 20px; bottom: 20px; left: -10px; width: 20px; cursor: move; }
+.gantt-annotation-handle-right  { top: 20px; bottom: 20px; right: -10px; width: 20px; cursor: move; }
+
+/* 四隅のハンドル：リサイズ用 */
+.gantt-annotation-handle-corner {
+    width: 30px; height: 30px;
+    z-index: 210;
+}
+.gantt-annotation-handle-tl { top: -15px; left: -15px; cursor: nwse-resize; }
+.gantt-annotation-handle-tr { top: -15px; right: -15px; cursor: nesw-resize; }
+.gantt-annotation-handle-bl { bottom: -15px; left: -15px; cursor: nesw-resize; }
+.gantt-annotation-handle-br { bottom: -15px; right: -15px; cursor: nwse-resize; }
+
+/* 枠全体のクリック透過を徹底 */
+.gantt-annotation-rect {
+    pointer-events: none !important;
+}
+.gantt-annotation-rect.selected {
+    box-shadow: none;
+}
+.gantt-annotation-comment {
+    position: absolute;
+    top: -30px;
+    left: 0;
+    width: min-content;
+    height: auto;
+    white-space: nowrap;
+    background-color: white; /* 吹き出しは不透明白に */
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    color: black;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    z-index: 11;
+    pointer-events: none;
+    border: 2px solid; /* 枠線。JSで色指定 */
+}
+.gantt-annotation-comment::after {
+    content: "";
+    position: absolute;
+    border-style: solid;
+    border-color: inherit;
+}
+
+/* 上配置の時（矢印は下向き） */
+.gantt-annotation-comment[style*="top: -30px"]::after {
+    bottom: -6px;
+    border-width: 6px 6px 0;
+    border-bottom-color: transparent;
+    border-left-color: transparent;
+    border-right-color: transparent;
+}
+.pos-top-left::after { left: 10px; }
+.pos-top-center::after { left: 50%; transform: translateX(-50%); }
+.pos-top-right::after { right: 10px; }
+
+/* 下配置の時（矢印は上向き） */
+.gantt-annotation-comment[style*="bottom:"]::after {
+    top: -6px;
+    border-width: 0 6px 6px;
+    border-top-color: transparent;
+    border-left-color: transparent;
+    border-right-color: transparent;
+}
+.pos-bottom-left::after { left: 10px; }
+.pos-bottom-center::after { left: 50%; transform: translateX(-50%); }
+.pos-bottom-right::after { right: 10px; }
+
+/* 左配置の時（矢印は右向き） */
+.gantt-annotation-comment[style*="right:"]::after {
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-width: 6px 0 6px 6px;
+    border-right-color: transparent;
+    border-top-color: transparent;
+    border-bottom-color: transparent;
+}
+/* 右配置の時（矢印は左向き） */
+.gantt-annotation-comment[style*="left: calc(100%"]::after {
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-width: 6px 6px 6px 0;
+    border-left-color: transparent;
+    border-top-color: transparent;
+    border-bottom-color: transparent;
+}

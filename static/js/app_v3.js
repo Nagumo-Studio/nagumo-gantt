@@ -127,8 +127,9 @@ let hasUnsavedChanges = false;
 let historyStack = [];
 let redoStack = [];
 let isUndoRedoAction = false;
-let copiedTaskRaw = null;
+let copiedTasksRaw = [];
 let deadlinesRaw = [];
+let annotationsRaw = [];
 
 // Gantt State
 let ganttConfig = {
@@ -308,6 +309,7 @@ function saveUISettings(newSettings = {}) {
 
     if (saveSettingsTimeout) clearTimeout(saveSettingsTimeout);
     saveSettingsTimeout = setTimeout(async () => {
+        if (!uiSettings || Object.keys(uiSettings).length === 0) return;
         try {
             await fetch('/api/settings', {
                 method: 'POST',
@@ -1012,6 +1014,11 @@ async function fetchDeadlines() {
     deadlinesRaw = await res.json();
 }
 
+async function fetchAnnotations() {
+    const res = await fetch(`/api/annotations?project=${currentProject}`);
+    annotationsRaw = await res.json();
+}
+
 async function reloadData() {
     historyStack = [];
     redoStack = [];
@@ -1019,6 +1026,7 @@ async function reloadData() {
     await fetchMasters();
     await fetchTasks();
     await fetchDeadlines();
+    await fetchAnnotations();
     renderGantt();
 }
 
@@ -1051,7 +1059,10 @@ function markUnsaved() {
 
 function saveHistory() {
     if (isUndoRedoAction) return;
-    const currentState = JSON.stringify(allTasksRaw);
+    const currentState = JSON.stringify({
+        tasks: allTasksRaw,
+        annotations: annotationsRaw
+    });
     historyStack.push(currentState);
     if (historyStack.length > 50) historyStack.shift();
     redoStack = [];
@@ -1068,8 +1079,13 @@ function updateUndoRedoButtons() {
 function performUndo() {
     if (historyStack.length === 0) return;
     isUndoRedoAction = true;
-    redoStack.push(JSON.stringify(allTasksRaw));
-    allTasksRaw = JSON.parse(historyStack.pop());
+    redoStack.push(JSON.stringify({
+        tasks: allTasksRaw,
+        annotations: annotationsRaw
+    }));
+    const state = JSON.parse(historyStack.pop());
+    allTasksRaw = state.tasks;
+    annotationsRaw = state.annotations || [];
     isUndoRedoAction = false;
     updateUndoRedoButtons();
     markUnsaved();
@@ -1079,8 +1095,13 @@ function performUndo() {
 function performRedo() {
     if (redoStack.length === 0) return;
     isUndoRedoAction = true;
-    historyStack.push(JSON.stringify(allTasksRaw));
-    allTasksRaw = JSON.parse(redoStack.pop());
+    historyStack.push(JSON.stringify({
+        tasks: allTasksRaw,
+        annotations: annotationsRaw
+    }));
+    const state = JSON.parse(redoStack.pop());
+    allTasksRaw = state.tasks;
+    annotationsRaw = state.annotations || [];
     isUndoRedoAction = false;
     updateUndoRedoButtons();
     markUnsaved();
@@ -1256,6 +1277,7 @@ function renderGantt() {
     renderDependencyLines();
     renderProgressLine();
     renderTodayLine();
+    renderAnnotations();
 }
 
 function renderTodayLine() {
@@ -1305,15 +1327,9 @@ function buildGroupsList() {
         console.log("Checking release collapse. relId:", String(relId), "isCollapsed:", isRelCollapsed);
         if (isRelCollapsed) return;
 
-        // タスクの配列順（登場順）でキャラクターの表示順を決定する
-        const charsInThisRelease = [];
-        const seenChars = new Set();
-        currentFilteredTasks.forEach(t => {
-            if (t.release_id === relId && t.char_id && !seenChars.has(t.char_id)) {
-                seenChars.add(t.char_id);
-                const charObj = masters.character.find(c => c.char_id === t.char_id);
-                if (charObj) charsInThisRelease.push(charObj);
-            }
+        // マスタの順序(masters.character)を優先しつつ、このリリースにタスクが存在するキャラのみ抽出
+        const charsInThisRelease = masters.character.filter(char => {
+            return currentFilteredTasks.some(t => t.release_id === relId && t.char_id === char.char_id);
         });
 
         charsInThisRelease.forEach(char => {
@@ -1386,7 +1402,8 @@ function buildGroupsList() {
                 const laneId = `${charId}_LANE${i}`;
                 // このレーンにタスクがあるかどうかを確認
                 const hasTask = sortedCharTasks.some(t => {
-                    const mappedLaneIdx = char.laneMapping[parseInt(t.lane) || 1] || 1;
+                    const laneVal = (t.lane !== undefined && t.lane !== null && String(t.lane).trim() !== '') ? parseInt(t.lane) : 1;
+                    const mappedLaneIdx = char.laneMapping[laneVal] || 1;
                     return mappedLaneIdx === i;
                 });
 
@@ -1822,6 +1839,144 @@ function renderTasks() {
     });
 
     els.ganttTasks.innerHTML = html;
+}
+
+function renderAnnotations() {
+    try {
+        // 既存のアノテーションを削除
+        document.querySelectorAll('.gantt-annotation-rect').forEach(el => el.remove());
+        
+        // annotationsRawが不正な場合のガード
+        if (!annotationsRaw || !Array.isArray(annotationsRaw) || annotationsRaw.length === 0) return;
+
+        annotationsRaw.forEach(ann => {
+            if (!ann) return;
+            
+            try {
+                // IDの完全一致を狙わず、trimして比較する
+                const sId = ann.start_lane_id ? String(ann.start_lane_id).trim() : '';
+                const eId = ann.end_lane_id ? String(ann.end_lane_id).trim() : '';
+
+                const startGroup = ganttConfig.groups.find(g => String(g.id).trim() === sId);
+                const endGroup = ganttConfig.groups.find(g => String(g.id).trim() === eId);
+                
+                if (!startGroup || !endGroup) return;
+
+                // 日付の妥当性チェック
+                if (!ann.start_date || !ann.end_date) return;
+                const mStart = moment(ann.start_date);
+                const mEnd = moment(ann.end_date);
+                if (!mStart.isValid() || !mEnd.isValid()) return;
+
+                const x = dateToX(mStart) - 8;
+                const endX = dateToX(mEnd.clone().add(1, 'days')) + 8;
+        const width = Math.max(10, endX - x);
+        
+        const y = startGroup.top;
+        const height = (endGroup.top + endGroup.height) - startGroup.top;
+
+        const rect = document.createElement('div');
+        rect.className = 'gantt-annotation-rect';
+        rect.dataset.id = ann.id;
+        rect.style.left = `${x}px`;
+        rect.style.top = `${y}px`;
+        rect.style.width = `${width}px`;
+        rect.style.height = `${height}px`;
+        rect.style.border = `${ann.border_width || 2}px solid ${ann.color || '#ff0000'}`;
+        rect.style.backgroundColor = 'transparent';
+        
+        if (ann.comment) {
+            const comment = document.createElement('div');
+            comment.className = 'gantt-annotation-comment';
+            comment.textContent = ann.comment;
+            comment.style.borderColor = ann.color || '#ff0000';
+            comment.style.color = 'black';
+            comment.style.cursor = 'move';
+            comment.style.pointerEvents = 'auto';
+            
+            // 位置の適用
+            const pos = ann.position || 'top-left';
+            applyAnnotationCommentPosition(comment, pos);
+
+            // ドラッグイベント
+            comment.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                startAnnotationCommentDrag(e, ann, comment, rect);
+            });
+
+            rect.appendChild(comment);
+        }
+
+        // 選択状態の反映
+        if (typeof selectedAnnotationId !== 'undefined' && selectedAnnotationId === ann.id) {
+            rect.classList.add('selected');
+        }
+
+        rect.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectAnnotation(ann.id);
+        });
+
+        rect.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectAnnotation(ann.id);
+            showAnnotationContextMenu(e, ann.id);
+        });
+
+        // 移動用ハンドル（四辺）
+        ['top', 'bottom', 'left', 'right'].forEach(edge => {
+            const h = document.createElement('div');
+            h.className = `gantt-annotation-handle gantt-annotation-handle-${edge}`;
+            h.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                e.stopPropagation();
+                e.preventDefault();
+                const mode = e.shiftKey ? `resize-${edge}` : 'move';
+                startAnnotationDrag(e, ann, mode);
+            });
+            rect.appendChild(h);
+        });
+
+        // リサイズ用ハンドル（四隅：より確実に上に重ねる）
+        ['tl', 'tr', 'bl', 'br'].forEach(corner => {
+            const h = document.createElement('div');
+            h.className = `gantt-annotation-handle gantt-annotation-handle-corner gantt-annotation-handle-${corner}`;
+            h.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                e.stopPropagation();
+                e.preventDefault();
+                
+                // 角に応じたリサイズモード（簡易的に全方向対応させる）
+                let mode = 'move';
+                if (corner === 'tl') mode = 'resize-tl';
+                else if (corner === 'tr') mode = 'resize-tr';
+                else if (corner === 'bl') mode = 'resize-bl';
+                else if (corner === 'br') mode = 'resize-br';
+                
+                startAnnotationDrag(e, ann, mode);
+            });
+            rect.appendChild(h);
+        });
+
+                els.ganttTasks.appendChild(rect);
+            } catch (e) {
+                console.error("Error rendering individual annotation:", e);
+            }
+        });
+    } catch (e) {
+        console.error("Error in renderAnnotations:", e);
+    }
+}
+
+let selectedAnnotationId = null;
+function selectAnnotation(id) {
+    selectedAnnotationId = id;
+    document.querySelectorAll('.gantt-annotation-rect').forEach(el => {
+        if (el.dataset.id === id) el.classList.add('selected');
+        else el.classList.remove('selected');
+    });
 }
 
 function renderDependencyLines() {
@@ -3428,18 +3583,52 @@ function setupMiscEvents() {
 
     document.getElementById('btn-save').addEventListener('click', async () => {
         try {
-            const res = await fetch(`/api/tasks/save?project=${currentProject}`, {
+            console.log("Starting Save process...");
+            
+            // 1. Save Tasks
+            // 1. Save Tasks
+            const resTasks = await fetch(`/api/tasks/save?project=${currentProject}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                mode: 'cors',
+                cache: 'no-cache',
                 body: JSON.stringify(allTasksRaw)
             });
-            
+            const resultTasks = await resTasks.json();
+
+            // 2. Save Deadlines
             const resDeadlines = await fetch(`/api/deadlines/save?project=${currentProject}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                mode: 'cors',
+                cache: 'no-cache',
                 body: JSON.stringify(deadlinesRaw)
             });
-            
+            const resultDeadlines = await resDeadlines.json();
+
+            // 3. Save Annotations
+            const cleanAnnotations = (annotationsRaw || []).map(ann => ({
+                id: String(ann.id),
+                release_id: String(ann.release_id || ''),
+                start_date: String(ann.start_date || ''),
+                end_date: String(ann.end_date || ''),
+                start_lane_id: String(ann.start_lane_id || ''),
+                end_lane_id: String(ann.end_lane_id || ''),
+                color: String(ann.color || '#ff0000'),
+                border_width: parseInt(ann.border_width) || 2,
+                comment: String(ann.comment || '').replace(/[\u0000-\u001F\u007F-\u009F]/g, ""),
+                position: String(ann.position || 'top-left')
+            }));
+
+            const resAnn = await fetch(`/api/annotations/save?project=${currentProject}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                mode: 'cors',
+                cache: 'no-cache',
+                body: JSON.stringify(cleanAnnotations)
+            });
+            const resultAnn = await resAnn.json();
+
             // タスクの出現順に基づいてマスターデータの順序も更新する
             if (masters.character) {
                 const orderedChars = [];
@@ -3465,27 +3654,24 @@ function setupMiscEvents() {
                 
                 masters.character = orderedChars;
                 
+                const masterData = { character: orderedChars };
                 await fetch(`/api/masters/save?project=${currentProject}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        master_type: 'character',
-                        data: orderedChars
-                    })
+                    body: JSON.stringify(masterData)
                 });
             }
 
-            const result = await res.json();
-            const resultDeadlines = await resDeadlines.json();
-            
-            if (result.status === 'success' && resultDeadlines.status === 'success') {
+            if (resultTasks.status === 'success' && resultDeadlines.status === 'success' && resultAnn.status === 'success') {
                 setUnsavedState(false);
                 alert('保存が完了しました。');
             } else {
-                alert('エラー: ' + result.message + ' / ' + resultDeadlines.message);
+                const msg = `タスク: ${resultTasks.status}\n〆切: ${resultDeadlines.status}\n注釈: ${resultAnn.status}\n\n詳細: ${resultAnn.message || resultTasks.message || resultDeadlines.message || ''}`;
+                alert('保存に失敗した項目があります:\n' + msg);
             }
         } catch(e) {
-            alert('保存に失敗しました。');
+            console.error("Save process exception:", e);
+            alert('保存処理中にエラーが発生しました:\n' + e.message + '\n\n※コンソールログも確認してください。');
         }
     });
 
@@ -5133,7 +5319,9 @@ function setupMiscEvents() {
             currentTaskContextId = taskId;
             
             // もし右クリックしたタスクが選択リストに入っていなければ、それ単一の選択に切り替える
-            if (!selectedTaskIds.has(taskId)) {
+            // (Set内の型不一致を考慮して両方チェック)
+            const isAlreadySelected = selectedTaskIds.has(taskId) || selectedTaskIds.has(String(taskId)) || (taskId && selectedTaskIds.has(parseInt(taskId)));
+            if (!isAlreadySelected) {
                 selectedTaskIds.clear();
                 document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
                 selectedTaskIds.add(taskId);
@@ -5178,17 +5366,32 @@ function setupMiscEvents() {
                 el.classList.remove('opacity-50', 'pointer-events-none');
             });
 
-            // 状態に応じてグレーアウト（無効化）する
+            // 状態に応じて表示・非表示を切り替える
             if (currentTaskContextId) {
-                // タスク上の場合: タスク作成・ペーストを無効化
-                contextMenu.querySelectorAll('#ctx-create-task, #ctx-paste').forEach(el => el.classList.add('opacity-50', 'pointer-events-none'));
-            } else {
-                // 空白（レーン上等）の場合: 編集・タスク関連操作を無効化
-                contextMenu.querySelectorAll('.ctx-item-edit, .ctx-item-task').forEach(el => el.classList.add('opacity-50', 'pointer-events-none'));
-                // ペーストはコピーされたタスクがない場合は無効化
-                if (!copiedTaskRaw) {
-                    document.getElementById('ctx-paste').classList.add('opacity-50', 'pointer-events-none');
+                // タスク上の場合: タスク作成・ペーストを非表示
+                contextMenu.querySelectorAll('#ctx-create-task, #ctx-paste').forEach(el => el.classList.add('hidden'));
+                // 複数選択時のみ「枠を作成」を表示
+                if (selectedTaskIds.size > 1) {
+                    document.getElementById('ctx-create-annotation').classList.remove('hidden');
+                } else {
+                    document.getElementById('ctx-create-annotation').classList.add('hidden');
                 }
+                contextMenu.querySelectorAll('.ctx-item-edit, .ctx-item-task').forEach(el => {
+                    el.classList.remove('hidden', 'opacity-50', 'pointer-events-none');
+                });
+            } else {
+                // 空白（レーン上等）の場合: 編集・タスク関連操作を非表示
+                contextMenu.querySelectorAll('.ctx-item-edit, .ctx-item-task, #ctx-create-annotation').forEach(el => el.classList.add('hidden'));
+                // ペースト
+                const pasteEl = document.getElementById('ctx-paste');
+                pasteEl.classList.remove('hidden');
+                if (copiedTasksRaw.length === 0) {
+                    pasteEl.classList.add('opacity-50', 'pointer-events-none');
+                } else {
+                    pasteEl.classList.remove('opacity-50', 'pointer-events-none');
+                }
+                // タスク作成
+                document.getElementById('ctx-create-task').classList.remove('hidden');
             }
 
             // ステータス変更サブメニューの動的生成
@@ -5246,6 +5449,26 @@ function setupMiscEvents() {
         document.getElementById('context-menu').classList.add('hidden');
     });
 
+    document.getElementById('ctx-create-annotation')?.addEventListener('click', () => {
+        if (selectedTaskIds.size > 0) {
+            createAnnotationFromSelectedTasks();
+        }
+        document.getElementById('context-menu').classList.add('hidden');
+    });
+
+    document.getElementById('ctx-delete-annotation')?.addEventListener('click', () => {
+        if (selectedAnnotationId) {
+            if (confirm('この枠を削除しますか？')) {
+                saveHistory();
+                annotationsRaw = annotationsRaw.filter(a => a.id !== selectedAnnotationId);
+                selectedAnnotationId = null;
+                markUnsaved();
+                renderGantt();
+            }
+        }
+        document.getElementById('context-menu').classList.add('hidden');
+    });
+
     document.addEventListener('click', (e) => {
         if (!e.target.closest('#context-menu') && e.button !== 2) {
             const contextMenu = document.getElementById('context-menu');
@@ -5271,27 +5494,21 @@ function setupMiscEvents() {
             e.preventDefault();
             if (typeof performRedo === 'function') performRedo();
         } else if (e.ctrlKey && e.code === 'KeyC') {
-            if (currentTaskContextId) {
+            if (selectedTaskIds.size > 0) {
+                copiedTasksRaw = Array.from(selectedTaskIds).map(id => {
+                    return JSON.parse(JSON.stringify(allTasksRaw.find(t => t.task_id === id)));
+                }).filter(t => t);
+                console.log(`Copied ${copiedTasksRaw.length} tasks via Ctrl+C`);
+            } else if (currentTaskContextId) {
                 const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
                 if (t) {
-                    copiedTaskRaw = JSON.parse(JSON.stringify(t));
-                    console.log("Task copied via Ctrl+C:", copiedTaskRaw);
-                } else {
-                    console.log("Ctrl+C failed: Task not found with ID", currentTaskContextId);
+                    copiedTasksRaw = [JSON.parse(JSON.stringify(t))];
+                    console.log("Task copied via Ctrl+C:", copiedTasksRaw[0]);
                 }
-            } else {
-                console.log("Ctrl+C failed: No task selected (currentTaskContextId is null)");
             }
         } else if (e.ctrlKey && e.code === 'KeyV') {
-            console.log("Ctrl+V pressed. copiedTaskRaw:", copiedTaskRaw, "currentHoverGroup:", currentHoverGroup, "currentHoverDate:", currentHoverDate);
-            if (copiedTaskRaw && currentHoverGroup && currentHoverDate) {
-                pasteTask(currentHoverGroup, currentHoverDate);
-            } else {
-                if (!copiedTaskRaw) {
-                    console.warn("Ctrl+V failed: No copied task data.");
-                } else if (!currentHoverGroup) {
-                    console.warn("Ctrl+V failed: Mouse is not hovering on a valid gantt row.");
-                }
+            if (copiedTasksRaw.length > 0 && currentHoverGroup && currentHoverDate) {
+                pasteTasks(currentHoverGroup, currentHoverDate);
             }
         } else if (e.key === 'Delete') {
             if (selectedDependency) {
@@ -5328,28 +5545,23 @@ function setupMiscEvents() {
     });
 
     document.getElementById('ctx-copy').addEventListener('click', () => {
-        if (currentTaskContextId) {
+        if (selectedTaskIds.size > 0) {
+            copiedTasksRaw = Array.from(selectedTaskIds).map(id => {
+                return JSON.parse(JSON.stringify(allTasksRaw.find(t => t.task_id === id)));
+            }).filter(t => t);
+            console.log(`Copied ${copiedTasksRaw.length} tasks via Menu`);
+        } else if (currentTaskContextId) {
             const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
             if (t) {
-                copiedTaskRaw = JSON.parse(JSON.stringify(t));
-                console.log("Task copied via Menu:", copiedTaskRaw);
-            } else {
-                console.warn("Menu Copy failed: Task not found with ID", currentTaskContextId);
+                copiedTasksRaw = [JSON.parse(JSON.stringify(t))];
             }
         }
         document.getElementById('context-menu').classList.add('hidden');
     });
 
     document.getElementById('ctx-paste').addEventListener('click', () => {
-        console.log("Menu Paste clicked. copiedTaskRaw:", copiedTaskRaw, "lastMouseGroup:", lastMouseGroup, "lastMouseTime:", lastMouseTime);
-        if (copiedTaskRaw && lastMouseGroup && lastMouseTime) {
-            pasteTask(lastMouseGroup, lastMouseTime);
-        } else {
-            if (!copiedTaskRaw) {
-                console.warn("Menu Paste failed: No copied task data.");
-            } else if (!lastMouseGroup) {
-                console.warn("Menu Paste failed: lastMouseGroup is null.");
-            }
+        if (copiedTasksRaw.length > 0 && lastMouseGroup && lastMouseTime) {
+            pasteTasks(lastMouseGroup, lastMouseTime);
         }
         document.getElementById('context-menu').classList.add('hidden');
     });
@@ -5367,92 +5579,78 @@ function setupMiscEvents() {
     });
 }
 
-function pasteTask(targetGroup, targetTime) {
-    console.log("pasteTask execution started. targetGroup:", targetGroup, "targetTime:", targetTime);
-    if (!copiedTaskRaw) {
-        console.error("pasteTask failed: No task was copied (copiedTaskRaw is null)");
-        return;
-    }
+function pasteTasks(targetGroup, targetTime) {
+    if (copiedTasksRaw.length === 0) return;
     saveHistory();
-    const newRaw = JSON.parse(JSON.stringify(copiedTaskRaw));
-    newRaw.task_id = 'TSK_' + Date.now();
-    
-    // コピーであることを視覚的にわかりやすくするため名前に「(コピー)」を付与
-    if (newRaw.task_name && !newRaw.task_name.endsWith(" (コピー)")) {
-        newRaw.task_name += " (コピー)";
-    }
-    
-    // コピーされた新タスクで先行関係(dependencies)を引き継ぐと描画が崩れたり
-    // 先行タスクの日付変更に勝手に追従して動いてしまいバグのように見えるため、ペースト時は空にするのが安全
-    newRaw.dependencies = '';
 
-    // targetGroup (laneId や charId などの行ID) から、ganttConfig.groups を走査して、
-    // 正確な release_id, char_id, lane を特定する
+    // 基準タスク（一番開始日が早いもの）を探す
+    let baseTask = copiedTasksRaw[0];
+    copiedTasksRaw.forEach(t => {
+        if (moment(t.start_date).isBefore(moment(baseTask.start_date))) {
+            baseTask = t;
+        }
+    });
+
+    const baseStart = moment(baseTask.start_date);
+    const targetStart = moment(targetTime).startOf('day');
+    const dayDiff = targetStart.diff(baseStart, 'days');
+
+    // ターゲットの情報を特定
+    let targetRelId, targetCharId, targetLaneOffset = 0;
     const group = ganttConfig.groups.find(g => String(g.id) === String(targetGroup));
-    console.log("Found matching group for paste:", group);
     if (group) {
-        if (group.type === 'lane' || group.type === 'character') {
-            if (group.type === 'lane') {
-                const charGroup = ganttConfig.groups.find(g => String(g.id) === String(group.parentId));
-                if (charGroup) {
-                    newRaw.release_id = String(charGroup.parentId);
-                    newRaw.char_id = charGroup.raw ? String(charGroup.raw.char_id) : String(copiedTaskRaw.char_id);
-                } else {
-                    newRaw.char_id = String(copiedTaskRaw.char_id);
-                }
-            } else {
-                newRaw.release_id = String(group.parentId);
-                newRaw.char_id = group.raw ? String(group.raw.char_id) : String(copiedTaskRaw.char_id);
-            }
-            
-            // マウス位置の属するキャラクターグループの「一番下」に生成するように、最大のlane番号+1を設定
-            const charTasks = allTasksRaw.filter(t => t.release_id === newRaw.release_id && t.char_id === newRaw.char_id);
-            let maxLane = 0;
-            charTasks.forEach(t => {
-                const l = parseInt(t.lane) || 1;
-                if (l > maxLane) maxLane = l;
-            });
-            newRaw.lane = String(maxLane + 1);
-
+        if (group.type === 'lane') {
+            const charGroup = ganttConfig.groups.find(g => String(g.id) === String(group.parentId));
+            targetRelId = charGroup ? String(charGroup.parentId) : null;
+            targetCharId = charGroup && charGroup.raw ? String(charGroup.raw.char_id) : null;
+            targetLaneOffset = parseInt(group.id.split('_LANE')[1]) || 1;
+        } else if (group.type === 'character') {
+            targetRelId = String(group.parentId);
+            targetCharId = group.raw ? String(group.raw.char_id) : null;
+            targetLaneOffset = 1;
         } else if (group.type === 'release') {
-            newRaw.release_id = String(group.id);
-            newRaw.char_id = String(copiedTaskRaw.char_id); // 幽霊タスク化（表示消滅）を防ぐためにコピー元のキャラクターを維持
-            
-            // 指定されたリリースにおける対象キャラクター内の最大レーン+1を設定
-            const charTasks = allTasksRaw.filter(t => t.release_id === newRaw.release_id && t.char_id === newRaw.char_id);
-            let maxLane = 0;
-            charTasks.forEach(t => {
-                const l = parseInt(t.lane) || 1;
-                if (l > maxLane) maxLane = l;
-            });
-            newRaw.lane = String(maxLane + 1);
-        }
-    } else {
-        // フォールバック
-        console.warn("Matching group not found for targetGroup:", targetGroup, ". Using fallback string split.");
-        const parts = targetGroup.split('_');
-        if (parts.length >= 4) {
-            newRaw.release_id = String(parts[0] + '_' + parts[1]);
-            newRaw.char_id = String(parts[2] + '_' + parts[3]);
-            newRaw.lane = parts[4] ? String(parts[4].replace('LANE', '')) : '1';
-        } else if (parts.length === 1) {
-            // 単なるリリースIDが渡された場合のスマートフォールバック
-            newRaw.release_id = String(targetGroup);
-            newRaw.char_id = String(copiedTaskRaw.char_id);
-            newRaw.lane = '1';
+            targetRelId = String(group.id);
+            targetCharId = null;
         }
     }
+
+    const newTasks = [];
+    const timestamp = Date.now();
+
+    copiedTasksRaw.forEach((orig, idx) => {
+        const newRaw = JSON.parse(JSON.stringify(orig));
+        newRaw.task_id = `TSK_${timestamp}_${idx}`;
+        
+        if (newRaw.task_name && !newRaw.task_name.endsWith(" (コピー)")) {
+            newRaw.task_name += " (コピー)";
+        }
+        newRaw.dependencies = '';
+
+        // 日付の移動
+        const s = moment(orig.start_date).add(dayDiff, 'days');
+        const e = moment(orig.end_date).add(dayDiff, 'days');
+        newRaw.start_date = s.format('YYYY-MM-DD');
+        newRaw.end_date = e.format('YYYY-MM-DD');
+
+        // グループの移動
+        if (targetRelId) newRaw.release_id = targetRelId;
+        if (targetCharId) newRaw.char_id = targetCharId;
+        
+        // レーンの調整（元のタスク同士のレーン差を維持）
+        const origBaseLane = parseInt(baseTask.lane) || 1;
+        const origThisLane = parseInt(orig.lane) || 1;
+        const laneDiff = origThisLane - origBaseLane;
+        newRaw.lane = String(Math.max(1, targetLaneOffset + laneDiff));
+
+        newTasks.push(newRaw);
+    });
+
+    allTasksRaw.push(...newTasks);
     
-    const oldStart = moment(copiedTaskRaw.start_date);
-    const oldEnd = moment(copiedTaskRaw.end_date);
-    const durationDays = oldEnd.diff(oldStart, 'days');
-    
-    const newStart = moment(targetTime).startOf('day');
-    newRaw.start_date = newStart.format('YYYY-MM-DD');
-    newRaw.end_date = newStart.clone().add(durationDays, 'days').format('YYYY-MM-DD');
-    
-    console.log("Pushing newly pasted task into allTasksRaw:", newRaw);
-    allTasksRaw.push(newRaw);
+    // 貼り付けたタスクを選択状態にする
+    selectedTaskIds.clear();
+    newTasks.forEach(t => selectedTaskIds.add(t.task_id));
+
     markUnsaved();
     renderGantt();
 }
@@ -5667,6 +5865,306 @@ function updateDurationTooltip(x, y, text, isInitial = false) {
         tooltip.style.left = `${x + 15}px`;
         tooltip.style.top = `${y + 15}px`;
     }
+}
+
+function createAnnotationFromSelectedTasks() {
+    console.log("createAnnotationFromSelectedTasks: Start. IDs:", Array.from(selectedTaskIds));
+    if (selectedTaskIds.size === 0) return;
+    saveHistory();
+
+    // 全ての選択タスクを確実に取得
+    const selectedTasks = [];
+    selectedTaskIds.forEach(sid => {
+        const t = allTasksRaw.find(x => String(x.task_id) === String(sid));
+        if (t) selectedTasks.push(t);
+    });
+    
+    console.log("createAnnotationFromSelectedTasks: Tasks found:", selectedTasks.length);
+    if (selectedTasks.length === 0) return;
+
+    let minStart = null;
+    let maxEnd = null;
+    let laneIds = new Set();
+    let relId = String(selectedTasks[0].release_id);
+
+    selectedTasks.forEach(t => {
+        const s = moment(t.start_date);
+        const e = moment(t.end_date);
+        if (!minStart || s.isBefore(minStart)) minStart = s;
+        if (!maxEnd || e.isAfter(maxEnd)) maxEnd = e;
+        
+        const rId = String(t.release_id).trim();
+        const cId = String(t.char_id).trim();
+        
+        let mappedLane = parseInt(t.lane) || 1;
+        const charGroupId = `${rId}_${cId}`;
+        const charGroup = ganttConfig.groups.find(g => g.type === 'character' && String(g.id).trim() === charGroupId);
+        if (charGroup && charGroup.raw && charGroup.raw.laneMapping) {
+            mappedLane = charGroup.raw.laneMapping[parseInt(t.lane) || 1] || mappedLane;
+        }
+        
+        const laneId = `${charGroupId}_LANE${mappedLane}`;
+        laneIds.add(laneId);
+    });
+
+    // ガント内のグループから対象レーンを抽出（型不一致を防ぐため trim と String を徹底）
+    const targetLanes = ganttConfig.groups
+        .filter(g => Array.from(laneIds).some(lid => String(g.id).trim() === String(lid).trim()))
+        .sort((a, b) => a.top - b.top);
+
+    console.log("createAnnotationFromSelectedTasks: targetLanes found:", targetLanes.length);
+    if (targetLanes.length === 0) {
+        alert("選択したタスクの表示行が見つかりませんでした。表示を更新してから再度お試しください。");
+        return;
+    }
+
+    const newAnn = {
+        id: 'ANN_' + Date.now(),
+        release_id: relId,
+        start_date: minStart.format('YYYY-MM-DD'),
+        end_date: maxEnd.format('YYYY-MM-DD'),
+        start_lane_id: targetLanes[0].id,
+        end_lane_id: targetLanes[targetLanes.length - 1].id,
+        color: '#ff0000',
+        border_width: 2,
+        comment: '新しい注釈',
+        position: 'top-left'
+    };
+
+    annotationsRaw.push(newAnn);
+    markUnsaved();
+    renderGantt();
+    
+    selectAnnotation(newAnn.id);
+}
+
+function showAnnotationContextMenu(e, annId) {
+    const ann = annotationsRaw.find(a => a.id === annId);
+    if (!ann) return;
+
+    const contextMenu = document.getElementById('context-menu');
+    if (!contextMenu) return;
+
+    // 全てのメニューアイテムを一旦非表示
+    contextMenu.querySelectorAll('.menu-item').forEach(el => el.classList.add('hidden'));
+
+    // アノテーション用の項目のみ表示
+    document.getElementById('ctx-sep-annotation').classList.remove('hidden');
+    document.getElementById('ctx-delete-annotation').classList.remove('hidden');
+
+    const editComment = document.createElement('div');
+    editComment.className = 'px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item-temp';
+    editComment.textContent = 'コメントを編集';
+    editComment.onclick = () => {
+        const currentVal = ann.comment || '';
+        const newComment = prompt('コメントを入力してください', currentVal);
+        if (newComment !== null) {
+            saveHistory();
+            // 文字列に強制変換し、不可視な制御文字を除去
+            ann.comment = String(newComment).replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim();
+            console.log(`%c[DEBUG] Annotation comment changed for ID ${ann.id}:`, "color: green; font-weight: bold;", ann.comment);
+            markUnsaved();
+            renderGantt();
+        }
+        contextMenu.classList.add('hidden');
+    };
+
+    const editColor = document.createElement('div');
+    editColor.className = 'px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item-temp';
+    editColor.textContent = '色を変更';
+    editColor.onclick = () => {
+        const picker = document.getElementById('global-color-picker');
+        if (picker) {
+            picker.value = ann.color || '#ff0000';
+            picker.onchange = (ev) => {
+                saveHistory();
+                ann.color = ev.target.value;
+                markUnsaved();
+                renderGantt();
+            };
+            picker.click();
+        }
+        contextMenu.classList.add('hidden');
+    };
+
+    contextMenu.appendChild(editComment);
+    contextMenu.appendChild(editColor);
+
+    contextMenu.style.left = e.clientX + 'px';
+    contextMenu.style.top = e.clientY + 'px';
+    contextMenu.classList.remove('hidden');
+
+    const onHide = () => {
+        editComment.remove();
+        editColor.remove();
+        document.removeEventListener('click', onHide);
+    };
+    setTimeout(() => document.addEventListener('click', onHide), 10);
+}
+
+function applyAnnotationCommentPosition(commentEl, pos) {
+    commentEl.className = 'gantt-annotation-comment';
+    commentEl.classList.add(`pos-${pos}`);
+    
+    commentEl.style.top = 'auto';
+    commentEl.style.bottom = 'auto';
+    commentEl.style.left = 'auto';
+    commentEl.style.right = 'auto';
+    commentEl.style.transform = 'none';
+
+    const gap = 8;
+    const offset = 34;
+
+    if (pos.startsWith('top-')) {
+        commentEl.style.top = `-${offset}px`;
+    } else if (pos.startsWith('bottom-')) {
+        commentEl.style.bottom = `-${offset}px`;
+    } else if (pos.startsWith('left-')) {
+        commentEl.style.right = `calc(100% + ${gap}px)`;
+    } else if (pos.startsWith('right-')) {
+        commentEl.style.left = `calc(100% + ${gap}px)`;
+    }
+
+    if (pos.includes('-left')) { commentEl.style.left = '0'; }
+    else if (pos.includes('-right')) { commentEl.style.right = '0'; }
+    else if (pos.includes('-top')) { commentEl.style.top = '0'; }
+    else if (pos.includes('-bottom')) { commentEl.style.bottom = '0'; }
+    else if (pos.includes('-center')) {
+        if (pos.startsWith('top') || pos.startsWith('bottom')) {
+            commentEl.style.left = '50%';
+            commentEl.style.transform = 'translateX(-50%)';
+        } else {
+            commentEl.style.top = '50%';
+            commentEl.style.transform = 'translateY(-50%)';
+        }
+    }
+}
+
+function startAnnotationDrag(e, ann, mode) {
+    const startX = e.clientX;
+    const startY = e.clientY;
+    
+    // ドラッグ開始時のデータを記憶
+    const initialStart = moment(ann.start_date);
+    const initialEnd = moment(ann.end_date);
+    const initialSLane = ann.start_lane_id;
+    const initialELane = ann.end_lane_id;
+
+    const onMouseMove = (ev) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+
+        if (mode === 'move' || mode === 'resize-left' || mode === 'resize-right') {
+            const dayDiff = Math.round(dx / ganttConfig.dayWidth);
+            if (mode === 'move') {
+                ann.start_date = initialStart.clone().add(dayDiff, 'days').format('YYYY-MM-DD');
+                ann.end_date = initialEnd.clone().add(dayDiff, 'days').format('YYYY-MM-DD');
+            } else if (mode.includes('left')) {
+                ann.start_date = initialStart.clone().add(dayDiff, 'days').format('YYYY-MM-DD');
+            } else if (mode.includes('right')) {
+                ann.end_date = initialEnd.clone().add(dayDiff, 'days').format('YYYY-MM-DD');
+            }
+        }
+
+        if (mode === 'move' || mode.includes('top') || mode.includes('bottom')) {
+            // マウス位置から最も近いレーンを特定
+            const rect = els.ganttBodyContent.getBoundingClientRect();
+            const mouseY = ev.clientY - rect.top;
+            
+            let hoveredGroup = null;
+            for (let i = 0; i < ganttConfig.groups.length; i++) {
+                const g = ganttConfig.groups[i];
+                if (mouseY >= g.top && mouseY < g.top + g.height) {
+                    hoveredGroup = g;
+                    break;
+                }
+            }
+
+            if (hoveredGroup && hoveredGroup.type === 'lane') {
+                if (mode === 'move') {
+                    // 全体移動
+                    const allLanes = ganttConfig.groups.filter(g => g.type === 'lane');
+                    const oldIdx = allLanes.findIndex(g => g.id === initialSLane);
+                    const curIdx = allLanes.findIndex(g => g.id === hoveredGroup.id);
+                    const diff = curIdx - oldIdx;
+                    
+                    const oldEndIdx = allLanes.findIndex(g => g.id === initialELane);
+                    
+                    const newSIdx = Math.max(0, Math.min(allLanes.length - 1, oldIdx + diff));
+                    const newEIdx = Math.max(0, Math.min(allLanes.length - 1, oldEndIdx + diff));
+                    
+                    ann.start_lane_id = allLanes[newSIdx].id;
+                    ann.end_lane_id = allLanes[newEIdx].id;
+                } else if (mode.includes('top')) {
+                    ann.start_lane_id = hoveredGroup.id;
+                } else if (mode.includes('bottom')) {
+                    ann.end_lane_id = hoveredGroup.id;
+                }
+            }
+        }
+        
+        renderAnnotations();
+    };
+
+    const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        saveHistory();
+        markUnsaved();
+        renderGantt();
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+}
+
+function startAnnotationCommentDrag(e, ann, commentEl, rectEl) {
+    const rect = rectEl.getBoundingClientRect();
+    
+    const onMouseMove = (ev) => {
+        commentEl.style.opacity = '0.5';
+    };
+
+    const onMouseUp = (ev) => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        commentEl.style.opacity = '1';
+
+        const mouseX = ev.clientX;
+        const mouseY = ev.clientY;
+        
+        const distTop = Math.abs(mouseY - rect.top);
+        const distBottom = Math.abs(mouseY - rect.bottom);
+        const distLeft = Math.abs(mouseX - rect.left);
+        const distRight = Math.abs(mouseX - rect.right);
+
+        const minDist = Math.min(distTop, distBottom, distLeft, distRight);
+        
+        let newPos = 'top-left';
+        if (minDist === distTop) {
+            const relX = (mouseX - rect.left) / rect.width;
+            newPos = `top-${relX < 0.33 ? 'left' : (relX < 0.66 ? 'center' : 'right')}`;
+        } else if (minDist === distBottom) {
+            const relX = (mouseX - rect.left) / rect.width;
+            newPos = `bottom-${relX < 0.33 ? 'left' : (relX < 0.66 ? 'center' : 'right')}`;
+        } else if (minDist === distLeft) {
+            const relY = (mouseY - rect.top) / rect.height;
+            newPos = `left-${relY < 0.33 ? 'top' : (relY < 0.66 ? 'center' : 'bottom')}`;
+        } else {
+            const relY = (mouseY - rect.top) / rect.height;
+            newPos = `right-${relY < 0.33 ? 'top' : (relY < 0.66 ? 'center' : 'bottom')}`;
+        }
+
+        if (ann.position !== newPos) {
+            saveHistory();
+            ann.position = newPos;
+            markUnsaved();
+            renderGantt();
+        }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
 }
 
 init();
