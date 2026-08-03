@@ -123,6 +123,7 @@ let availableProjects = [];
 let currentProject = 'Sample';
 let openProjects = []; // 開かれているプロジェクトタブ
 let hasUnsavedChanges = false;
+let lastActionTime = 0; // 自動更新（ポーリング）の競合防止用
 
 let historyStack = [];
 let redoStack = [];
@@ -323,8 +324,11 @@ function saveUISettings(newSettings = {}) {
 }
 
 async function saveMastersOrder(type) {
-    if (!masters[type] || masters[type].length === 0) {
-        console.warn(`saveMastersOrder: Aborted. ${type} data is empty or null.`);
+    if (!masters[type] || !Array.isArray(masters[type]) || masters[type].length === 0) {
+        const msg = `CRITICAL: saveMastersOrder: Aborted to prevent data loss. ${type} data is empty or null!`;
+        console.error(msg);
+        alert(msg);
+        serverLog('ERROR', `Master preservation triggered. Type: ${type}`);
         return;
     }
     try {
@@ -1054,6 +1058,7 @@ function setUnsavedState(isUnsaved) {
 }
 
 function markUnsaved() {
+    lastActionTime = Date.now();
     setUnsavedState(true);
 }
 
@@ -1148,7 +1153,8 @@ function setupMasterSync() {
     // 3秒ごとにサーバーのマスタ更新日時（あるいは簡易的に再取得）を確認
     setInterval(async () => {
         // ユーザーがツール上で未保存の変更を持っている場合は、勝手に更新するとコンフリクトするので避ける
-        if (hasUnsavedChanges) return;
+        // ユーザーが編集中の場合や、直近10秒以内に操作があった場合は同期をスキップ
+        if (hasUnsavedChanges || (Date.now() - lastActionTime < 10000)) return;
 
         try {
             // マスタの最終更新時間を取得する軽量なAPIがないため、
@@ -1166,6 +1172,12 @@ function setupMasterSync() {
             
             // 簡易的な比較（文字列表現で比較）
             if (JSON.stringify(newMasters) !== JSON.stringify(masters)) {
+                // 異常系チェック：サーバーから取得したデータが不自然に空の場合は同期しない
+                if (masters.character && masters.character.length > 0 && (!newMasters.character || newMasters.character.length === 0)) {
+                    console.error("CRITICAL: Server returned empty character master during polling. Sync aborted to prevent data loss.");
+                    return;
+                }
+                
                 console.log("Masters updated on server. Reloading data...");
                 masters = newMasters;
                 // マスタに依存するUIパーツ（フィルター等）も更新が必要
@@ -1256,6 +1268,10 @@ function updateFilteredTasks() {
 }
 
 function renderGantt() {
+    if (!masters.character || masters.character.length === 0) {
+        console.warn("renderGantt: Character master is empty. Redrawing skipped to avoid flicker.");
+    }
+    
     updateFilteredTasks();
     
     ganttConfig.totalDays = ganttConfig.endDate.diff(ganttConfig.startDate, 'days');
@@ -1883,14 +1899,34 @@ function renderAnnotations() {
         rect.style.width = `${width}px`;
         rect.style.height = `${height}px`;
         rect.style.border = `${ann.border_width || 2}px solid ${ann.color || '#ff0000'}`;
-        rect.style.backgroundColor = 'transparent';
+        // 背景色の設定（指定がない場合は枠色を流用）
+        if (ann.bg_color === 'none') {
+            rect.style.backgroundColor = 'transparent';
+        } else {
+            const baseBgColor = ann.bg_color || ann.color || '#ff0000';
+            // hexカラーコードの場合は20%の透明度'33'を付与
+            rect.style.backgroundColor = (baseBgColor.startsWith('#') && baseBgColor.length === 7) ? baseBgColor + '33' : baseBgColor;
+        }
         
         if (ann.comment) {
             const comment = document.createElement('div');
             comment.className = 'gantt-annotation-comment';
             comment.textContent = ann.comment;
-            comment.style.borderColor = ann.color || '#ff0000';
-            comment.style.color = 'black';
+            
+            // 枠線の色を設定
+            const borderColor = ann.color || '#ff0000';
+            comment.style.borderColor = borderColor;
+
+            // 背景色（枠色の淡い色）を計算して適用
+            const getPaleColor = (hex) => {
+                if (!hex || !hex.startsWith('#') || hex.length !== 7) return '#ffffff';
+                const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+                const pr = Math.round(r * 0.12 + 255 * 0.88), pg = Math.round(g * 0.12 + 255 * 0.88), pb = Math.round(b * 0.12 + 255 * 0.88);
+                return `rgb(${pr}, ${pg}, ${pb})`;
+            };
+            comment.style.setProperty('--ann-bg-color', getPaleColor(borderColor));
+
+            comment.style.color = '#1a202c';
             comment.style.cursor = 'move';
             comment.style.pointerEvents = 'auto';
             
@@ -1905,6 +1941,12 @@ function renderAnnotations() {
                 startAnnotationCommentDrag(e, ann, comment, rect);
             });
 
+            // ダブルクリックで編集
+            comment.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                editAnnotationComment(ann.id);
+            });
+
             rect.appendChild(comment);
         }
 
@@ -1916,6 +1958,11 @@ function renderAnnotations() {
         rect.addEventListener('click', (e) => {
             e.stopPropagation();
             selectAnnotation(ann.id);
+        });
+
+        rect.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            editAnnotationComment(ann.id);
         });
 
         rect.addEventListener('contextmenu', (e) => {
@@ -2409,6 +2456,11 @@ function setupMouseTracking() {
     els.taskTooltip = taskTooltip;
 
     els.ganttBody.addEventListener('mousedown', (e) => {
+        // 注釈（矩形）の選択を解除（注釈本体やハンドルをクリックした場所以外）
+        if (!e.target.closest('.gantt-annotation-rect') && !e.target.closest('.gantt-annotation-handle')) {
+            if (typeof selectAnnotation === 'function') selectAnnotation(null);
+        }
+
         if (e.target.closest('.gantt-task-item') || e.target.closest('.gantt-resize-handle') || e.target.closest('.gantt-deadline-marker')) return;
         if (e.button !== 0) return;
         
@@ -3101,58 +3153,30 @@ function setupMouseTracking() {
                             const draggedCharId = draggedGroup.raw ? draggedGroup.raw.char_id : null;
                             
                             if (targetRelId === draggedRelId && targetCharId && targetCharId !== draggedCharId) {
-                                // ガントに表示されているキャラクターの順序を取得
-                                const charGroups = ganttConfig.groups.filter(g => g.type === 'character' && g.parentId === targetRelId);
-                                const charIds = charGroups.map(g => g.raw.char_id);
-                                
-                                const fromIdx = charIds.indexOf(draggedCharId);
-                                let toIdx = charIds.indexOf(targetCharId);
+                                // 安全な並び替えロジック：masters.character 配列内で要素を入れ替えるだけにする
+                                const fromIdx = masters.character.findIndex(c => String(c.char_id) === String(draggedCharId));
+                                const toIdx = masters.character.findIndex(c => String(c.char_id) === String(targetCharId));
                                 
                                 if (fromIdx !== -1 && toIdx !== -1) {
-                                    // ドラッグ方向に応じて挿入位置を調整
-                                    if (dragState.initialRowIndex < dragState.targetRowIndex) {
-                                        toIdx = toIdx + 1;
-                                    }
+                                    console.log(`Reordering character: ${draggedCharId} -> ${targetCharId}`);
+                                    const item = masters.character[fromIdx];
+                                    masters.character.splice(fromIdx, 1);
                                     
-                                    charIds.splice(fromIdx, 1);
-                                    if (fromIdx < toIdx) {
-                                        toIdx--;
+                                    // 削除後の配列から改めてターゲットのインデックスを探す（移動方向によるズレを正確に補正）
+                                    const newToIdx = masters.character.findIndex(c => String(c.char_id) === String(targetCharId));
+                                    if (newToIdx !== -1) {
+                                        // 自身より後ろの要素にドラッグした（下方向へ移動）場合は、その要素の後ろに挿入
+                                        const insertIdx = (fromIdx < toIdx) ? newToIdx + 1 : newToIdx;
+                                        masters.character.splice(insertIdx, 0, item);
+                                    } else {
+                                        masters.character.push(item);
                                     }
-                                    charIds.splice(toIdx, 0, draggedCharId);
-                                    
-                                    // マスタ(masters.character)の順序を更新
-                                    const otherChars = masters.character.filter(c => !charIds.includes(c.char_id));
-                                    const sortedChars = [];
-                                    charIds.forEach(id => {
-                                        const c = masters.character.find(x => x.char_id === id);
-                                        if (c) sortedChars.push(c);
-                                    });
-                                    masters.character = [...sortedChars, ...otherChars];
                                     
                                     // マスタの並び順を保存
                                     saveMastersOrder('character');
-
-                                    // タスクの並び順 (allTasksRaw) も更新する（キャラクターごとのブロックを維持するため）
-                                    const newTasks = [];
-                                    const targetReleaseTasks = allTasksRaw.filter(t => t.release_id === targetRelId);
-                                    const otherTasks = allTasksRaw.filter(t => t.release_id !== targetRelId);
                                     
-                                    charIds.forEach(cid => {
-                                        const tasksForChar = targetReleaseTasks.filter(t => t.char_id === cid);
-                                        newTasks.push(...tasksForChar);
-                                    });
-                                    
-                                    const noCharTasks = targetReleaseTasks.filter(t => !charIds.includes(t.char_id));
-                                    newTasks.push(...noCharTasks);
-                                    
-                                    const firstTargetIdx = allTasksRaw.findIndex(t => t.release_id === targetRelId);
-                                    if (firstTargetIdx !== -1) {
-                                        const before = allTasksRaw.slice(0, firstTargetIdx).filter(t => t.release_id !== targetRelId);
-                                        const after = allTasksRaw.slice(firstTargetIdx).filter(t => t.release_id !== targetRelId);
-                                        allTasksRaw = [...before, ...newTasks, ...after];
-                                    } else {
-                                        allTasksRaw = [...otherTasks, ...newTasks];
-                                    }
+                                    // タスク(allTasksRaw)の物理的な並び順は変更しない（不整合・消失のリスクがあるため）
+                                    // ガントの表示順は masters.character に依存するため、これだけで並び替えは反映される
                                     
                                     markUnsaved();
                                     renderGantt();
@@ -3207,6 +3231,12 @@ function setupMouseTracking() {
                                     raw.release_id = parts[0] + '_' + parts[1];
                                     raw.char_id = parts[2] + '_' + parts[3];
                                     raw.lane = parts[4] ? parts[4].replace('LANE', '') : '1';
+                                    
+                                    // 移動先のキャラクターに合わせてセクションIDを更新（整合性維持）
+                                    const targetChar = masters.character.find(c => String(c.char_id) === String(raw.char_id));
+                                    if (targetChar && targetChar.section_id) {
+                                        raw.section_id = targetChar.section_id;
+                                    }
                                 }
                             }
                         }
@@ -3615,6 +3645,7 @@ function setupMiscEvents() {
                 start_lane_id: String(ann.start_lane_id || ''),
                 end_lane_id: String(ann.end_lane_id || ''),
                 color: String(ann.color || '#ff0000'),
+                bg_color: String(ann.bg_color || ''),
                 border_width: parseInt(ann.border_width) || 2,
                 comment: String(ann.comment || '').replace(/[\u0000-\u001F\u007F-\u009F]/g, ""),
                 position: String(ann.position || 'top-left')
@@ -3630,7 +3661,7 @@ function setupMiscEvents() {
             const resultAnn = await resAnn.json();
 
             // タスクの出現順に基づいてマスターデータの順序も更新する
-            if (masters.character) {
+            /* if (masters.character && masters.character.length > 0) {
                 const orderedChars = [];
                 const seenChars = new Set();
                 
@@ -3660,7 +3691,7 @@ function setupMiscEvents() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(masterData)
                 });
-            }
+            } */
 
             if (resultTasks.status === 'success' && resultDeadlines.status === 'success' && resultAnn.status === 'success') {
                 setUnsavedState(false);
@@ -5956,50 +5987,113 @@ function showAnnotationContextMenu(e, annId) {
     editComment.className = 'px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item-temp';
     editComment.textContent = 'コメントを編集';
     editComment.onclick = () => {
-        const currentVal = ann.comment || '';
-        const newComment = prompt('コメントを入力してください', currentVal);
-        if (newComment !== null) {
-            saveHistory();
-            // 文字列に強制変換し、不可視な制御文字を除去
-            ann.comment = String(newComment).replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim();
-            console.log(`%c[DEBUG] Annotation comment changed for ID ${ann.id}:`, "color: green; font-weight: bold;", ann.comment);
-            markUnsaved();
-            renderGantt();
-        }
+        editAnnotationComment(ann.id);
         contextMenu.classList.add('hidden');
     };
 
-    const editColor = document.createElement('div');
-    editColor.className = 'px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item-temp';
-    editColor.textContent = '色を変更';
-    editColor.onclick = () => {
-        const picker = document.getElementById('global-color-picker');
-        if (picker) {
-            picker.value = ann.color || '#ff0000';
-            picker.onchange = (ev) => {
+    const presetColors = [
+        { name: '赤', color: '#ef4444' },
+        { name: '青', color: '#3b82f6' },
+        { name: '緑', color: '#10b981' },
+        { name: '黄', color: '#f59e0b' },
+        { name: '橙', color: '#f97316' },
+        { name: '紫', color: '#8b5cf6' },
+        { name: '桃', color: '#ec4899' },
+        { name: '水', color: '#06b6d4' },
+        { name: '灰', color: '#6b7280' },
+        { name: '黒', color: '#000000' },
+        { name: '白', color: '#ffffff' }
+    ];
+
+    const createColorSubMenu = (label, isBackground) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'relative group menu-item-temp';
+        const item = document.createElement('div');
+        item.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer font-bold text-gray-700 flex justify-between items-center';
+        item.innerHTML = `<span>${label}</span><span>▶</span>`;
+        const sub = document.createElement('div');
+        sub.className = 'absolute left-full top-0 hidden group-hover:block bg-white border shadow-lg rounded py-1 w-36 -ml-1 z-[30000]';
+
+        const colors = isBackground ? [{ name: '塗りつぶしなし', color: 'none' }, ...presetColors] : presetColors;
+
+        colors.forEach(c => {
+            const d = document.createElement('div');
+            d.className = 'px-4 py-1.5 hover:bg-blue-100 cursor-pointer flex items-center space-x-2 text-xs';
+            const colorCircle = c.color === 'none' ?
+                '<span class="w-3 h-3 rounded-full border border-gray-300 relative overflow-hidden"><span class="absolute top-1/2 left-0 w-full h-[1px] bg-red-500 rotate-45"></span></span>' :
+                `<span class="w-3 h-3 rounded-full border border-gray-300" style="background-color:${c.color}"></span>`;
+            d.innerHTML = `${colorCircle}<span>${c.name}</span>`;
+            d.onclick = (ev) => {
+                ev.stopPropagation();
                 saveHistory();
-                ann.color = ev.target.value;
+                if (isBackground) ann.bg_color = c.color;
+                else ann.color = c.color;
                 markUnsaved();
                 renderGantt();
+                contextMenu.classList.add('hidden');
             };
-            picker.click();
-        }
-        contextMenu.classList.add('hidden');
+            sub.appendChild(d);
+        });
+
+        // カスタム色（カラーピッカー）
+        const custom = document.createElement('div');
+        custom.className = 'px-4 py-1.5 border-t hover:bg-blue-100 cursor-pointer flex items-center space-x-2 text-xs font-bold';
+        custom.innerHTML = `<span>🎨</span><span>カスタム...</span>`;
+        custom.onclick = (ev) => {
+            ev.stopPropagation();
+            const picker = document.getElementById('global-color-picker');
+            if (picker) {
+                picker.value = (isBackground ? ann.bg_color : ann.color) || '#ff0000';
+                picker.onchange = (e) => {
+                    saveHistory();
+                    if (isBackground) ann.bg_color = e.target.value;
+                    else ann.color = e.target.value;
+                    markUnsaved();
+                    renderGantt();
+                };
+                picker.click();
+            }
+            contextMenu.classList.add('hidden');
+        };
+        sub.appendChild(custom);
+
+        wrapper.appendChild(item);
+        wrapper.appendChild(sub);
+        return wrapper;
     };
 
+    const borderMenu = createColorSubMenu('枠色を変更', false);
+    const bgMenu = createColorSubMenu('背景色を変更', true);
+
     contextMenu.appendChild(editComment);
-    contextMenu.appendChild(editColor);
+    contextMenu.appendChild(borderMenu);
+    contextMenu.appendChild(bgMenu);
 
     contextMenu.style.left = e.clientX + 'px';
     contextMenu.style.top = e.clientY + 'px';
     contextMenu.classList.remove('hidden');
 
     const onHide = () => {
-        editComment.remove();
-        editColor.remove();
+        if (contextMenu) {
+            contextMenu.querySelectorAll('.menu-item-temp').forEach(el => el.remove());
+        }
         document.removeEventListener('click', onHide);
     };
     setTimeout(() => document.addEventListener('click', onHide), 10);
+}
+
+function editAnnotationComment(annId) {
+    const ann = annotationsRaw.find(a => a.id === annId);
+    if (!ann) return;
+    const currentVal = ann.comment || '';
+    const newComment = prompt('コメントを入力してください', currentVal);
+    if (newComment !== null) {
+        saveHistory();
+        // 文字列に強制変換し、不可視な制御文字を除去
+        ann.comment = String(newComment).replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim();
+        markUnsaved();
+        renderGantt();
+    }
 }
 
 function applyAnnotationCommentPosition(commentEl, pos) {
@@ -6013,12 +6107,13 @@ function applyAnnotationCommentPosition(commentEl, pos) {
     commentEl.style.transform = 'none';
 
     const gap = 8;
-    const offset = 34;
 
     if (pos.startsWith('top-')) {
-        commentEl.style.top = `-${offset}px`;
+        // 吹き出しの下端を、矩形の上端からgap(8px)分だけ上に配置
+        commentEl.style.bottom = `calc(100% + ${gap + 2}px)`; // 突起が刺さらないよう微調整(+2px)
     } else if (pos.startsWith('bottom-')) {
-        commentEl.style.bottom = `-${offset}px`;
+        // 吹き出しの上端を、矩形の下端からgap(8px)分だけ下に配置
+        commentEl.style.top = `calc(100% + ${gap + 2}px)`;    // 突起が刺さらないよう微調整(+2px)
     } else if (pos.startsWith('left-')) {
         commentEl.style.right = `calc(100% + ${gap}px)`;
     } else if (pos.startsWith('right-')) {
@@ -6120,15 +6215,60 @@ function startAnnotationDrag(e, ann, mode) {
 
 function startAnnotationCommentDrag(e, ann, commentEl, rectEl) {
     const rect = rectEl.getBoundingClientRect();
-    
+    const cRect = commentEl.getBoundingClientRect();
+    const cw = cRect.width;
+    const ch = cRect.height;
+
     const onMouseMove = (ev) => {
         commentEl.style.opacity = '0.5';
+        commentEl.style.pointerEvents = 'none';
+        
+        const mouseX = ev.clientX;
+        const mouseY = ev.clientY;
+        
+        const distTop = Math.abs(mouseY - rect.top);
+        const distBottom = Math.abs(mouseY - rect.bottom);
+        const distLeft = Math.abs(mouseX - rect.left);
+        const distRight = Math.abs(mouseX - rect.right);
+        const minDist = Math.min(distTop, distBottom, distLeft, distRight);
+
+        // 自由移動用のスタイル上書き
+        commentEl.style.top = 'auto';
+        commentEl.style.bottom = 'auto';
+        commentEl.style.left = 'auto';
+        commentEl.style.right = 'auto';
+        commentEl.style.transform = 'none';
+
+        const gap = 8;
+
+        if (minDist === distTop) {
+            commentEl.style.bottom = `calc(100% + ${gap + 2}px)`;
+            let x = mouseX - rect.left - cw / 2;
+            x = Math.max(0, Math.min(rect.width - cw, x));
+            commentEl.style.left = `${x}px`;
+        } else if (minDist === distBottom) {
+            commentEl.style.top = `calc(100% + ${gap + 2}px)`;
+            let x = mouseX - rect.left - cw / 2;
+            x = Math.max(0, Math.min(rect.width - cw, x));
+            commentEl.style.left = `${x}px`;
+        } else if (minDist === distLeft) {
+            commentEl.style.right = `calc(100% + ${gap}px)`;
+            let y = mouseY - rect.top - ch / 2;
+            y = Math.max(0, Math.min(rect.height - ch, y));
+            commentEl.style.top = `${y}px`;
+        } else {
+            commentEl.style.left = `calc(100% + ${gap}px)`;
+            let y = mouseY - rect.top - ch / 2;
+            y = Math.max(0, Math.min(rect.height - ch, y));
+            commentEl.style.top = `${y}px`;
+        }
     };
 
     const onMouseUp = (ev) => {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         commentEl.style.opacity = '1';
+        commentEl.style.pointerEvents = 'auto';
 
         const mouseX = ev.clientX;
         const mouseY = ev.clientY;
@@ -6137,7 +6277,6 @@ function startAnnotationCommentDrag(e, ann, commentEl, rectEl) {
         const distBottom = Math.abs(mouseY - rect.bottom);
         const distLeft = Math.abs(mouseX - rect.left);
         const distRight = Math.abs(mouseX - rect.right);
-
         const minDist = Math.min(distTop, distBottom, distLeft, distRight);
         
         let newPos = 'top-left';
@@ -6159,8 +6298,8 @@ function startAnnotationCommentDrag(e, ann, commentEl, rectEl) {
             saveHistory();
             ann.position = newPos;
             markUnsaved();
-            renderGantt();
         }
+        renderGantt(); // 常に再描画してドラッグ用のスタイルをリセット
     };
 
     document.addEventListener('mousemove', onMouseMove);

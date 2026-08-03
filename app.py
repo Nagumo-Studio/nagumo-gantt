@@ -52,10 +52,20 @@ def read_csv_as_dicts(filepath):
 def write_dicts_to_csv(filepath, fieldnames, data):
     dir_path = os.path.dirname(filepath)
     if dir_path: os.makedirs(dir_path, exist_ok=True)
-    with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(data)
+    
+    # 一時ファイルに書き込んでから置換（アトミックな書き込み）
+    fd, temp_path = tempfile.mkstemp(dir=dir_path, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
+        # 成功したら元のファイルを置換 (os.replace は Windows でもアトミックに既存ファイルを上書き可能)
+        os.replace(temp_path, filepath)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise e
 
 @app.route('/')
 def index():
@@ -141,7 +151,7 @@ def save_annotations():
     try:
         p_dir = get_project_dir(request.args.get('project', 'Sample'))
         data = request.json
-        fieldnames = ['id', 'release_id', 'start_date', 'end_date', 'start_lane_id', 'end_lane_id', 'color', 'border_width', 'comment', 'position']
+        fieldnames = ['id', 'release_id', 'start_date', 'end_date', 'start_lane_id', 'end_lane_id', 'color', 'bg_color', 'border_width', 'comment', 'position']
         for row in data:
             for field in fieldnames:
                 if field not in row: row[field] = ''
@@ -169,15 +179,27 @@ def save_masters():
             m_type = data['master_type']
             if m_type in master_files:
                 fn, flds = master_files[m_type]
-                write_dicts_to_csv(os.path.join(p_dir, fn), flds, data['data'])
-                return jsonify({'status': 'success'})
+                records = data['data']
+                if records is not None:
+                    write_dicts_to_csv(os.path.join(p_dir, fn), flds, records)
+                    return jsonify({'status': 'success'})
         
         # 複数マスタ一括形式 { 'release': [...], 'character': [...] } に対応
         if isinstance(data, dict):
             for key, records in data.items():
                 if key in master_files:
                     fn, flds = master_files[key]
-                    write_dicts_to_csv(os.path.join(p_dir, fn), flds, records)
+                    # 安全策：レコードが空の場合は上書きしない（特にキャラクターマスター消失防止）
+                    # 空にする操作は本来マスタエディタで行うべきであり、ガントチャートからの
+                    # 不完全なデータ送信による消失を防ぐ。
+                    if records is not None and len(records) > 0:
+                        write_dicts_to_csv(os.path.join(p_dir, fn), flds, records)
+                    elif records is not None and len(records) == 0:
+                        # 既存ファイルがある場合は、空での上書きを禁止する（重大なバグ回避）
+                        if not os.path.exists(os.path.join(p_dir, fn)):
+                             write_dicts_to_csv(os.path.join(p_dir, fn), flds, records)
+                        else:
+                             logging.warning(f"Prevented wiping master file: {fn}")
         return jsonify({'status': 'success'})
     except Exception as e: return jsonify({'status': 'error', 'message': str(e)}), 500
 

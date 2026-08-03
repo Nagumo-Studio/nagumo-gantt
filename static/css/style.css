@@ -320,10 +320,9 @@ body, html {
 /* アノテーション（矩形注釈） */
 .gantt-annotation-rect {
     position: absolute;
-    pointer-events: none;
-    z-index: 200;
+    pointer-events: auto; /* 背景をクリックして選択可能にする */
+    z-index: 15;          /* タスク(20)の背面に配置 */
     transition: box-shadow 0.2s;
-    background-color: rgba(255, 255, 255, 0.2) !important;
     border-radius: 6px;
 }
 /* 当たり判定用ハンドル */
@@ -352,79 +351,109 @@ body, html {
 .gantt-annotation-handle-bl { bottom: -15px; left: -15px; cursor: nesw-resize; }
 .gantt-annotation-handle-br { bottom: -15px; right: -15px; cursor: nwse-resize; }
 
-/* 枠全体のクリック透過を徹底 */
-.gantt-annotation-rect {
-    pointer-events: none !important;
-}
+/* 選択中のスタイル */
 .gantt-annotation-rect.selected {
-    box-shadow: none;
+    z-index: 210;            /* 選択中はタスクより手前に表示 */
+    pointer-events: none;    /* ただし背景は透過させ、中のタスクを選択可能にする */
+    /* 選択中であることを強調：太めの光る枠線と影 */
+    box-shadow: 0 0 0 2px white, 0 0 0 5px #3b82f6, 0 0 20px rgba(59, 130, 246, 0.5);
+    outline: none;
+}
+
+/* 選択中のハンドルをより強調 */
+.gantt-annotation-rect.selected .gantt-annotation-handle {
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+}
+.gantt-annotation-rect.selected .gantt-annotation-handle:hover {
+    background: rgba(59, 130, 246, 0.4);
+    border: 1px solid #3b82f6;
 }
 .gantt-annotation-comment {
     position: absolute;
-    top: -30px;
-    left: 0;
     width: min-content;
     height: auto;
     white-space: nowrap;
-    background-color: white; /* 吹き出しは不透明白に */
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
+    /* JSから制御可能な変数を使用 */
+    --ann-bg-color: #ffffff;
+    background-color: var(--ann-bg-color);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
     font-weight: bold;
-    color: black;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    z-index: 11;
-    pointer-events: none;
-    border: 2px solid; /* 枠線。JSで色指定 */
+    color: #1a202c;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    z-index: 220; /* 矩形(210)より前面 */
+    pointer-events: auto; /* ダブルクリック可能にするため */
+    border: 2px solid;    /* JSでborderColorを設定 */
+    transition: transform 0.1s ease-out;
 }
+
+/* 吹き出しの突起共通設定 */
+.gantt-annotation-comment::before,
 .gantt-annotation-comment::after {
     content: "";
     position: absolute;
     border-style: solid;
-    border-color: inherit;
+    display: block;
+    width: 0;
+    height: 0;
 }
 
-/* 上配置の時（矢印は下向き） */
-.gantt-annotation-comment[style*="top: -30px"]::after {
-    bottom: -6px;
-    border-width: 6px 6px 0;
-    border-bottom-color: transparent;
-    border-left-color: transparent;
-    border-right-color: transparent;
+/* 突起の外枠（ボーダー）部分 */
+.gantt-annotation-comment::before {
+    border-color: inherit; /* 親のborder-color（JS設定）を継承 */
+    z-index: -1;
 }
-.pos-top-left::after { left: 10px; }
-.pos-top-center::after { left: 50%; transform: translateX(-50%); }
-.pos-top-right::after { right: 10px; }
 
-/* 下配置の時（矢印は上向き） */
-.gantt-annotation-comment[style*="bottom:"]::after {
-    top: -6px;
-    border-width: 0 6px 6px;
-    border-top-color: transparent;
-    border-left-color: transparent;
-    border-right-color: transparent;
+/* 突起の内側（塗りつぶし）部分 */
+.gantt-annotation-comment::after {
+    border-color: var(--ann-bg-color);
+    z-index: 1;
 }
-.pos-bottom-left::after { left: 10px; }
-.pos-bottom-center::after { left: 50%; transform: translateX(-50%); }
-.pos-bottom-right::after { right: 10px; }
 
-/* 左配置の時（矢印は右向き） */
-.gantt-annotation-comment[style*="right:"]::after {
-    right: -6px;
-    top: 50%;
-    transform: translateY(-50%);
-    border-width: 6px 0 6px 6px;
-    border-right-color: transparent;
-    border-top-color: transparent;
-    border-bottom-color: transparent;
+/* --- 配置別の突起形状と位置 --- */
+
+/* 上配置 (突起は下向き) */
+.pos-top-left::before, .pos-top-center::before, .pos-top-right::before {
+    bottom: -8px; border-width: 8px 7px 0; border-left-color: transparent; border-right-color: transparent;
 }
-/* 右配置の時（矢印は左向き） */
-.gantt-annotation-comment[style*="left: calc(100%"]::after {
-    left: -6px;
-    top: 50%;
-    transform: translateY(-50%);
-    border-width: 6px 6px 6px 0;
-    border-left-color: transparent;
-    border-top-color: transparent;
-    border-bottom-color: transparent;
+.pos-top-left::after, .pos-top-center::after, .pos-top-right::after {
+    bottom: -5px; border-width: 7px 6px 0; border-left-color: transparent; border-right-color: transparent;
 }
+.pos-top-left::before, .pos-top-left::after { left: 12px; }
+.pos-top-center::before, .pos-top-center::after { left: 50%; transform: translateX(-50%); }
+.pos-top-right::before, .pos-top-right::after { right: 12px; }
+
+/* 下配置 (突起は上向き) */
+.pos-bottom-left::before, .pos-bottom-center::before, .pos-bottom-right::before {
+    top: -8px; border-width: 0 7px 8px; border-left-color: transparent; border-right-color: transparent;
+}
+.pos-bottom-left::after, .pos-bottom-center::after, .pos-bottom-right::after {
+    top: -5px; border-width: 0 6px 7px; border-left-color: transparent; border-right-color: transparent;
+}
+.pos-bottom-left::before, .pos-bottom-left::after { left: 12px; }
+.pos-bottom-center::before, .pos-bottom-center::after { left: 50%; transform: translateX(-50%); }
+.pos-bottom-right::before, .pos-bottom-right::after { right: 12px; }
+
+/* 左配置 (突起は右向き) */
+.pos-left-top::before, .pos-left-center::before, .pos-left-bottom::before {
+    right: -8px; border-width: 7px 0 7px 8px; border-top-color: transparent; border-bottom-color: transparent;
+}
+.pos-left-top::after, .pos-left-center::after, .pos-left-bottom::after {
+    right: -5px; border-width: 6px 0 6px 7px; border-top-color: transparent; border-bottom-color: transparent;
+}
+.pos-left-top::before, .pos-left-top::after { top: 8px; }
+.pos-left-center::before, .pos-left-center::after { top: 50%; transform: translateY(-50%); }
+.pos-left-bottom::before, .pos-left-bottom::after { bottom: 8px; }
+
+/* 右配置 (突起は左向き) */
+.pos-right-top::before, .pos-right-center::before, .pos-right-bottom::before {
+    left: -8px; border-width: 7px 8px 7px 0; border-top-color: transparent; border-bottom-color: transparent;
+}
+.pos-right-top::after, .pos-right-center::after, .pos-right-bottom::after {
+    left: -5px; border-width: 6px 7px 6px 0; border-top-color: transparent; border-bottom-color: transparent;
+}
+.pos-right-top::before, .pos-right-top::after { top: 8px; }
+.pos-right-center::before, .pos-right-center::after { top: 50%; transform: translateY(-50%); }
+.pos-right-bottom::before, .pos-right-bottom::after { bottom: 8px; }
